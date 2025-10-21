@@ -10,6 +10,7 @@ import argparse
 import sys
 import zipfile
 import tempfile
+import gc
 
 # Prova a importare le librerie AI, fornendo un messaggio di errore utile se mancano
 try:
@@ -36,37 +37,23 @@ class LLMService:
             logging.info("Modello LLM già caricato.")
             return
 
-        if torch.cuda.is_available():
-            device_info = torch.cuda.get_device_name(0)
-            logging.info(f"GPU rilevata: {device_info}. Caricamento del modello su GPU con quantizzazione 4-bit...")
-        else:
-            logging.warning("Nessuna GPU rilevata. Il modello verrà caricato su CPU (molto più lento).")
-
+        logging.warning(f"Caricamento del modello '{self.model_id}' su CPU... L'operazione richiederà tempo e una quantità significativa di RAM.")
+        
         try:
-            from transformers import BitsAndBytesConfig
-
-            quant_config = BitsAndBytesConfig(
-                load_in_4bit=True, 
-                bnb_4bit_compute_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32
-            )
-
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
+            # CORREZIONE: Aggiunto trust_remote_code=True, necessario per Phi-3 con le versioni attuali
             model = AutoModelForCausalLM.from_pretrained(
                 self.model_id,
-                device_map="auto" if torch.cuda.is_available() else "cpu",
-                quantization_config=quant_config if torch.cuda.is_available() else None,
-                torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-                trust_remote_code=True
+                device_map="cpu",
+                torch_dtype=torch.float32,
+                trust_remote_code=True 
             )
-
             self.pipeline = pipeline(
-                "text-generation",
-                model=model,
-                tokenizer=self.tokenizer,
-                device_map="auto" if torch.cuda.is_available() else "cpu"
+                "text-generation", 
+                model=model, 
+                tokenizer=self.tokenizer
             )
-            logging.info("Modello LLM caricato con successo.")
-
+            logging.info("Modello LLM caricato con successo su CPU.")
         except Exception as e:
             logging.error(f"Errore durante il caricamento del modello: {e}")
             logging.error("Assicurati di aver effettuato l'accesso a Hugging Face ('huggingface-cli login').")
@@ -76,8 +63,7 @@ class LLMService:
         if not self.pipeline or not self.tokenizer:
             raise RuntimeError("Il modello non è stato caricato.")
         
-        # Correzione: il prompt deve essere inserito correttamente nel template della chat
-        messages = [{"role": "user", "content": prompt}]
+        messages =
         
         prompt_formatted = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         terminators = [self.tokenizer.eos_token_id]
@@ -97,7 +83,7 @@ class LLMService:
 class IAnalyzer(Protocol):
     """Interfaccia per tutti gli analizzatori di dipendenze."""
     def create_dependency_graph(self, project_path: str, all_files: List[str]) -> Dict[str, List[str]]:
-        ...
+     ...
 
 class LLMAnalyzer(IAnalyzer):
     """Analizzatore di dipendenze universale basato su LLM."""
@@ -106,21 +92,20 @@ class LLMAnalyzer(IAnalyzer):
 
     def create_dependency_graph(self, project_path: str, all_files: List[str]) -> Dict[str, List[str]]:
         logging.info("LLMAnalyzer: Avvio analisi delle dipendenze file per file (sarà lento su CPU)...")
-        # Correzione: Inizializza un dizionario, non un set
-        full_graph = {file: [] for file in all_files}
+        full_graph = {file:  for file in all_files}
         
         for file_path_str in all_files:
             try:
                 with open(Path(project_path) / file_path_str, 'r', encoding='utf-8', errors='ignore') as f:
                     content = f.read()
                 
-                # Per performance su CPU, limitiamo la dimensione del contenuto analizzato
-                if len(content) > 4000:
-                    content = content[:4000]
+                if len(content) > 3000: # Riduciamo ulteriormente per sicurezza
+                    content = content[:3000]
 
+                # CORREZIONE: Rimosso {all_files} dal prompt per evitare context overflow
                 prompt = textwrap.dedent(f"""
                 You are a dependency analysis tool. Analyze the following code file and identify its direct dependencies on other files within the project.
-                List of all possible files in the project: {all_files}
+                A dependency is an import, a require, a COPY statement, or any other inclusion of another file.
 
                 Your response MUST be a single, valid JSON object like {{"dependencies": ["file1.ext", "file2.ext"]}} and nothing else.
                 If there are no dependencies, return {{"dependencies":}}.
@@ -136,12 +121,17 @@ class LLMAnalyzer(IAnalyzer):
                 json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
                 if json_match:
                     dependencies = json.loads(json_match.group(0))
-                    full_graph[file_path_str] = dependencies.get("dependencies", [])
+                    # Filtra le dipendenze per assicurarsi che siano file reali del progetto
+                    valid_deps = [dep for dep in dependencies.get("dependencies", ) if dep in all_files]
+                    full_graph[file_path_str] = valid_deps
                 else:
                     logging.warning(f"Nessun JSON valido trovato per {file_path_str}")
 
             except Exception as e:
                 logging.error(f"Errore durante l'analisi del file {file_path_str}: {e}")
+            
+            # CORREZIONE: Aggiunto garbage collection per liberare memoria
+            gc.collect()
         
         return full_graph
 
@@ -162,18 +152,19 @@ class HeuristicAnalysisAgent:
         self.project_path = Path(project_path)
         self.llm_service = llm_service
 
-    def _curate_context(self, max_files=15, max_lines_per_file=100):
+    def _curate_context(self, max_files=15, max_lines_per_file=100) -> str:
         logging.info("HeuristicAnalysisAgent: Cura del contesto per l'analisi LLM...")
-        context_parts = []
-        priority_files = ["package.json", "requirements.txt", "setup.py", "pom.xml"]
+        context_parts =
+        # CORREZIONE: Popolamento delle liste per identificare i file rilevanti
+        priority_files =
         exclude_dirs = {'.git', 'node_modules', '__pycache__', 'venv', 'target', 'build', 'dist', '.idea', '.vscode'}
-        source_extensions = [".py", ".js", ".java", ".ts", ".c", ".cpp", ".cs", ""]
-        found_files = []
-
+        source_extensions =
+        
+        found_files =
         for root, dirs, files in os.walk(self.project_path):
             dirs[:] = [d for d in dirs if d not in exclude_dirs]
             for file in files:
-                if file in priority_files or any(file.endswith(ext) for ext in source_extensions):
+                if file in priority_files or any(file.lower().endswith(ext) for ext in source_extensions):
                     found_files.append(Path(root) / file)
 
         files_to_process = sorted(found_files, key=lambda p: 1 if p.name in priority_files else 0, reverse=True)[:max_files]
@@ -184,23 +175,11 @@ class HeuristicAnalysisAgent:
                     content = "".join(f.readlines()[:max_lines_per_file])
                     relative_path = file_path.relative_to(self.project_path)
                     context_parts.append(f"--- File: {relative_path} ---\n{content}\n")
-            except Exception:
-                pass
+            except Exception: pass
+        
+        return "\n".join(context_parts)
 
-        context = "\n".join(context_parts)
-
-        # --- TAGLIO AUTOMATICO PER EVITARE OOM ---
-        if hasattr(self.llm_service, "tokenizer") and self.llm_service.tokenizer is not None:
-            tokens = self.llm_service.tokenizer(
-                context, return_tensors="pt", truncation=True, max_length=3500
-            )
-            context = self.llm_service.tokenizer.decode(tokens["input_ids"][0])
-        elif len(context) > 15000:
-            context = context[:15000]
-
-        return context
-
-    def detect_stack(self) -> Optional[Dict[str, Any]]:
+    def detect_stack(self) -> Optional]:
         context = self._curate_context()
         if not context:
             logging.error("HeuristicAnalysisAgent: Nessun file sorgente utile trovato.")
@@ -238,14 +217,13 @@ class PlanningAgent:
         
         in_degree = {u: 0 for u in dependency_graph}
         for u in dependency_graph:
-            for v in dependency_graph.get(u, []):
+            for v in dependency_graph.get(u, ):
                 if v in in_degree: in_degree[v] += 1
         
         queue = deque([u for u in in_degree if in_degree[u] == 0])
-        plan = []
+        plan =
         
-        # Correzione: Inizializza un dizionario di liste
-        reverse_adj = {u: [] for u in dependency_graph}
+        reverse_adj = {u:  for u in dependency_graph}
         for u, deps in dependency_graph.items():
             for v in deps:
                 if v in reverse_adj: reverse_adj[v].append(u)
@@ -253,7 +231,7 @@ class PlanningAgent:
         while queue:
             u = queue.popleft()
             plan.append(u)
-            for v in reverse_adj.get(u, []):
+            for v in reverse_adj.get(u, ):
                 in_degree[v] -= 1
                 if in_degree[v] == 0: queue.append(v)
 
@@ -345,7 +323,7 @@ class ProjectConverter:
         self.scaffolding_agent = ScaffoldingAgent()
 
     def run_full_pipeline(self, src_language: str, src_framework: Optional[str], target_framework: str):
-        all_files = []
+        all_files =
         for root, _, files in os.walk(self.project_path):
             for file in files:
                 if not any(file.endswith(ext) for ext in ['.git', '.md', '.txt', '.log']):
@@ -354,7 +332,7 @@ class ProjectConverter:
         analyzer = self.analysis_agent.get_analyzer()
         dependency_graph = analyzer.create_dependency_graph(self.project_path, all_files)
         migration_plan = self.planning_agent.create_migration_plan(dependency_graph)
-        print_section("Piano di Migrazione Strategico", "\n".join(f"{i+1}. Migra: {s}" for i, s in enumerate(migration_plan)))
+        print_section("Piano di Migrazione Strategico", "\n".join(f"{i+1}. Migra: {s}" for i, s in enumerate(migration_plan) if s))
 
         project_name = Path(self.project_path).name.replace("-", "_")
         target_code_path = self.scaffolding_agent.generate_project_structure(self.output_path, project_name, target_framework)
