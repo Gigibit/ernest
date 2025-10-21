@@ -1,0 +1,4 @@
+torch
+bitsandbytes
+huggingface_hub[cli]
+
