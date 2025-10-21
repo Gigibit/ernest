@@ -1,6 +1,6 @@
 torch
 hf_transfer
-transformers==
+transformers
 accelerate
 bitsandbytes
 huggingface_hub[cli]
