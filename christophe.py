@@ -25,91 +25,54 @@ logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 # --- SERVIZIO LLM CENTRALIZZATO (MODIFICATO PER CPU) ---
 
 class LLMService:
-    """Gestisce il caricamento e l'interazione con un modello LLM da Hugging Face."""
     def __init__(self, model_id: str = "microsoft/Phi-3-mini-4k-instruct"):
         self.model_id = model_id
         self.pipeline = None
-        self.tokenizer = None
 
     def load_model(self):
         if self.pipeline:
-            logging.info("Modello LLM già caricato.")
+            logging.info("Modello già caricato.")
             return
 
-        use_cuda = torch.cuda.is_available()
-        if not use_cuda:
-            logging.warning("Nessuna GPU rilevata. Se vuoi comunque caricare su CPU, avvia lo script con --allow-cpu-model.")
-            raise RuntimeError("GPU richiesta per questa configurazione (usa --allow-cpu-model per forzare CPU).")
+        if not torch.cuda.is_available():
+            raise RuntimeError("Nessuna GPU rilevata. Serve una GPU per questo modello.")
 
-        # Informazioni GPU
-        try:
-            device_name = torch.cuda.get_device_name(0)
-        except Exception:
-            device_name = "GPU (info non disponibile)"
-        logging.info(f"GPU rilevata: {device_name}. Imposterò limiti di memoria per evitare OOM.")
-
-        # Imposta limiti di memoria: RTX 4090 ~ 24GB
-        # Se hai una configurazione multi-GPU adatta, adatta il dizionario
-        max_mem = {0: "24GB"}  # attenzione: 4090 ha ~24GB VRAM
-        logging.info(f"Impostando max_memory per device: {max_mem}")
+        logging.info(f"GPU rilevata: {torch.cuda.get_device_name(0)}")
 
         try:
             from transformers import BitsAndBytesConfig
             quant_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_use_double_quant=True,
-                                            bnb_4bit_compute_dtype=torch.bfloat16)
+                                             bnb_4bit_compute_dtype=torch.bfloat16)
         except Exception:
-            logging.warning("bitsandbytes non disponibile o incompatibile; provo a caricare senza 4-bit.")
             quant_config = None
 
-        try:
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_id, use_fast=True)
+        tokenizer = AutoTokenizer.from_pretrained(self.model_id, use_fast=True)
 
-            model_kwargs = dict(
-                device_map="auto",
-                max_memory=max_mem,
-                trust_remote_code=True
-            )
-            if quant_config is not None:
-                model_kwargs.update({
-                    "quantization_config": quant_config,
-                    "torch_dtype": torch.bfloat16
-                })
-            else:
-                model_kwargs.update({"torch_dtype": torch.float16})
+        model_kwargs = dict(
+            device_map="auto",
+            trust_remote_code=True,
+        )
+        if quant_config:
+            model_kwargs.update({"quantization_config": quant_config, "torch_dtype": torch.bfloat16})
+        else:
+            model_kwargs.update({"torch_dtype": torch.float16})
 
-            model = AutoModelForCausalLM.from_pretrained(self.model_id, **model_kwargs)
-
-            # pipeline su GPU: device 0
-            self.pipeline = pipeline("text-generation", model=model, tokenizer=self.tokenizer)
-            logging.info("Modello LLM caricato con successo su GPU 0.")
-
-        except RuntimeError as e:
-            logging.error(f"Errore di runtime durante il caricamento modello (probabile OOM): {e}")
-            logging.error("Prova a ridurre il modello, usare offload oppure abilitare quantizzazione 4-bit con bitsandbytes.")
-            raise
-        except Exception as e:
-            logging.error(f"Errore generico durante il caricamento del modello: {e}")
-            raise
+        model = AutoModelForCausalLM.from_pretrained(self.model_id, **model_kwargs)
+        self.pipeline = pipeline("text-generation", model=model, tokenizer=tokenizer)
+        logging.info("Modello LLM caricato con successo su GPU.")
 
     def invoke(self, prompt: str, max_new_tokens: int = 512) -> str:
-        if not self.pipeline or not self.tokenizer:
+        if not self.pipeline:
             raise RuntimeError("Il modello non è stato caricato.")
-        
-        # Correzione: il prompt deve essere inserito correttamente nel template della chat
-        messages = [{"role": "user", "content": prompt}]
-        
-        prompt_formatted = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        terminators = [self.tokenizer.eos_token_id]
 
         outputs = self.pipeline(
-            prompt_formatted,
+            prompt,
             max_new_tokens=max_new_tokens,
-            eos_token_id=terminators,
             do_sample=True,
             temperature=0.1,
             top_p=0.9,
         )
-        return outputs["generated_text"][len(prompt_formatted):]
+        return outputs[0]["generated_text"][len(prompt):]
 
 # --- DEFINIZIONE DELLE INTERFACCE E DEGLI ANALIZZATORI ---
 
