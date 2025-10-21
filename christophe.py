@@ -10,7 +10,10 @@ import argparse
 import sys
 import zipfile
 import tempfile
+'''
+    tested with [INFO] GPU rilevata: NVIDIA GeForce RTX 5090 when "worked"
 
+'''
 # Prova a importare le librerie AI, fornendo un messaggio di errore utile se mancano
 try:
     import torch
@@ -46,6 +49,7 @@ class LLMService:
                 torch_dtype=torch.float16,
                 trust_remote_code=True
             )
+            
 
             self.pipeline = pipeline(
                 "text-generation",
