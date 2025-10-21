@@ -1,4 +1,5 @@
 torch
+hf_transfer
 transformers
 accelerate
 bitsandbytes
