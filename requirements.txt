@@ -1,4 +1,6 @@
 torch
+transformers
+accelerate
 bitsandbytes
 huggingface_hub[cli]
 
