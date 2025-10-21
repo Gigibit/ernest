@@ -80,7 +80,7 @@ class LLMService:
             model = AutoModelForCausalLM.from_pretrained(self.model_id, **model_kwargs)
 
             # pipeline su GPU: device 0
-            self.pipeline = pipeline("text-generation", model=model, tokenizer=self.tokenizer, device=0)
+            self.pipeline = pipeline("text-generation", model=model, tokenizer=self.tokenizer)
             logging.info("Modello LLM caricato con successo su GPU 0.")
 
         except RuntimeError as e:
