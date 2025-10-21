@@ -1,8 +1,7 @@
+torch
 hf_transfer
-transformers==4.35.2
-huggingface_hub==0.16.4
-accelerate==1.15.0
-torch>=2.0
+transformers==
+accelerate
 bitsandbytes
 huggingface_hub[cli]
 
