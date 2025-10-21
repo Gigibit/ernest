@@ -25,9 +25,9 @@ logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 # --- SERVIZIO LLM CENTRALIZZATO (MODIFICATO PER CPU) ---
 
 class LLMService:
-    def __init__(self, model_id: str = "microsoft/Phi-3-mini-4k-instruct"):
-        self.model_id = model_id
+    def __init__(self, model_id: str = "mistralai/Mistral-7B-Instruct-v0.3"):
         self.pipeline = None
+        self.model_id = model_id
 
     def load_model(self):
         if self.pipeline:
