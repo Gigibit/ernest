@@ -29,33 +29,33 @@ class LLMService:
         self.model_id = model_id
         self.pipeline = None
 
-def load_model(self):
-    if self.pipeline:
-        logging.info("Modello LLM già caricato.")
-        return
+    def load_model(self):
+        if self.pipeline:
+            logging.info("Modello LLM già caricato.")
+            return
 
-    if not torch.cuda.is_available():
-        raise RuntimeError("GPU non rilevata, serve una GPU per questo modello.")
+        if not torch.cuda.is_available():
+            raise RuntimeError("GPU non rilevata, serve una GPU per questo modello.")
 
-    try:
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_id, use_fast=True)
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_id, use_fast=True)
 
-        model = AutoModelForCausalLM.from_pretrained(
-            self.model_id,
-            device_map="auto",
-            torch_dtype=torch.float16,
-            trust_remote_code=True
-        )
+            model = AutoModelForCausalLM.from_pretrained(
+                self.model_id,
+                device_map="auto",
+                torch_dtype=torch.float16,
+                trust_remote_code=True
+            )
 
-        self.pipeline = pipeline(
-            "text-generation",
-            model=model,
-            tokenizer=self.tokenizer
-        )
-        logging.info("Modello LLM caricato con successo su GPU.")
-    except Exception as e:
-        logging.error(f"Errore durante il caricamento del modello: {e}")
-        raise
+            self.pipeline = pipeline(
+                "text-generation",
+                model=model,
+                tokenizer=self.tokenizer
+            )
+            logging.info("Modello LLM caricato con successo su GPU.")
+        except Exception as e:
+            logging.error(f"Errore durante il caricamento del modello: {e}")
+            raise
 
     def invoke(self, prompt: str, max_new_tokens: int = 512) -> str:
         if not self.pipeline:
