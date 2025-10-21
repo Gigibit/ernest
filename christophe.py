@@ -29,37 +29,33 @@ class LLMService:
         self.model_id = model_id
         self.pipeline = None
 
-    def load_model(self):
-        if self.pipeline:
-            logging.info("Modello già caricato.")
-            return
+def load_model(self):
+    if self.pipeline:
+        logging.info("Modello LLM già caricato.")
+        return
 
-        if not torch.cuda.is_available():
-            raise RuntimeError("Nessuna GPU rilevata. Serve una GPU per questo modello.")
+    if not torch.cuda.is_available():
+        raise RuntimeError("GPU non rilevata, serve una GPU per questo modello.")
 
-        logging.info(f"GPU rilevata: {torch.cuda.get_device_name(0)}")
+    try:
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_id, use_fast=True)
 
-        try:
-            from transformers import BitsAndBytesConfig
-            quant_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_use_double_quant=True,
-                                             bnb_4bit_compute_dtype=torch.bfloat16)
-        except Exception:
-            quant_config = None
-
-        tokenizer = AutoTokenizer.from_pretrained(self.model_id, use_fast=True)
-
-        model_kwargs = dict(
+        model = AutoModelForCausalLM.from_pretrained(
+            self.model_id,
             device_map="auto",
-            trust_remote_code=True,
+            torch_dtype=torch.float16,
+            trust_remote_code=True
         )
-        if quant_config:
-            model_kwargs.update({"quantization_config": quant_config, "torch_dtype": torch.bfloat16})
-        else:
-            model_kwargs.update({"torch_dtype": torch.float16})
 
-        model = AutoModelForCausalLM.from_pretrained(self.model_id, **model_kwargs)
-        self.pipeline = pipeline("text-generation", model=model, tokenizer=tokenizer)
+        self.pipeline = pipeline(
+            "text-generation",
+            model=model,
+            tokenizer=self.tokenizer
+        )
         logging.info("Modello LLM caricato con successo su GPU.")
+    except Exception as e:
+        logging.error(f"Errore durante il caricamento del modello: {e}")
+        raise
 
     def invoke(self, prompt: str, max_new_tokens: int = 512) -> str:
         if not self.pipeline:
