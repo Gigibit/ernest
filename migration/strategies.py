@@ -84,6 +84,7 @@ class TranslationStrategy:
             f"Return ONLY {self.target_language.strip()} with no commentary,"
             f" TODO markers, or markdown fences. Ensure the output compiles"
             f" cleanly."
+            f"Return ONLY {self.target_language.strip()}."
         )
 
 
