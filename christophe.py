@@ -9,12 +9,14 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from analysis.dependency_agent import DependencyAnalysisAgent
 from analysis.heuristic_agent import HeuristicAnalysisAgent
 from analysis.semantic_graph import SemanticGraphBuilder
 from core.cache_manager import CacheManager
 from core.cost_model import estimate_h100_receipt
 from core.file_utils import secure_unzip
 from core.llm_service import LLMService
+from migration.dependency_resolver import DependencyResolver
 from migration.recovery_manager import RecoveryManager
 from migration.resource_migrator import ResourceMigrator
 from migration.source_migrator import SourceMigrator
@@ -28,6 +30,7 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
     "translate": {"id": "mistralai/Mixtral-8x22B-Instruct-v0.1", "max": 4096, "temp": 0.0},
     "adapt": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1024, "temp": 0.0},
     "scaffold": {"id": "mistralai/Mixtral-8x22B-Instruct-v0.1", "max": 2048, "temp": 0.1},
+    "dependency": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1536, "temp": 0.0},
 }
 
 
@@ -100,10 +103,27 @@ def run_migration(
             output_root, project_name, target_framework, target_lang
         )
 
+        dependency_agent = DependencyAnalysisAgent(temp_dir, llm_service, cache_manager)
+        dependency_snapshot = dependency_agent.extract_dependencies(
+            target_language=target_lang,
+            target_framework=target_framework,
+        )
+
         recovery_path = target_path / "migration_state.json"
         recovery = RecoveryManager(recovery_path)
         src_migrator = SourceMigrator(llm_service, cache_manager, recovery)
         res_migrator = ResourceMigrator(llm_service, cache_manager)
+        dependency_resolver = DependencyResolver(
+            llm_service,
+            cache_manager,
+            download_root=target_path / "third_party",
+        )
+        dependency_resolution = dependency_resolver.resolve(
+            dependency_snapshot,
+            target_language=target_lang,
+            target_framework=target_framework,
+            perform_downloads=True,
+        )
 
         for src in plan:
             source_file = temp_dir / src
@@ -144,6 +164,8 @@ def run_migration(
         "output_root": output_root,
         "project_name": project_name,
         "recovery_path": recovery_path,
+        "dependencies": dependency_snapshot,
+        "dependency_resolution": dependency_resolution,
         "token_usage": token_usage,
         "cost_estimate": cost_estimate,
     }
@@ -253,6 +275,14 @@ def create_app(
                 </ul>
                 <p><strong>Classification summary:</strong></p>
                 <pre>{{ result.classification | tojson(indent=2) }}</pre>
+                {% if result.dependencies %}
+                <p><strong>Dependency manifests:</strong></p>
+                <pre>{{ result.dependencies | tojson(indent=2) }}</pre>
+                {% endif %}
+                {% if result.dependency_resolution %}
+                <p><strong>Dependency handling:</strong></p>
+                <pre>{{ result.dependency_resolution | tojson(indent=2) }}</pre>
+                {% endif %}
                 {% if result.token_usage %}
                 <p><strong>Token usage:</strong></p>
                 <pre>{{ result.token_usage | tojson(indent=2) }}</pre>
@@ -392,6 +422,8 @@ def create_app(
                         "detected_stack": migration["detected_stack"],
                         "plan": migration["plan"],
                         "classification": migration["classification"],
+                        "dependencies": migration.get("dependencies", {}),
+                        "dependency_resolution": migration.get("dependency_resolution", {}),
                         "token_usage": migration.get("token_usage", {}),
                         "cost_estimate": migration.get("cost_estimate", {}),
                     }
@@ -475,6 +507,8 @@ def create_app(
             "detected_stack": migration["detected_stack"],
             "classification": migration["classification"],
             "plan": migration["plan"],
+            "dependencies": migration.get("dependencies", {}),
+            "dependency_resolution": migration.get("dependency_resolution", {}),
             "token_usage": migration.get("token_usage", {}),
             "cost_estimate": migration.get("cost_estimate", {}),
         }
@@ -556,6 +590,20 @@ def main() -> None:
     print_section("Stack Rilevato", json.dumps(result["detected_stack"], indent=2))
     print_section("Piano di Migrazione", "\n".join(result["plan"]))
     print_section("Progetto Migrato", f"Output generato in: {result['target_path']}")
+    dependencies = result.get("dependencies")
+    if dependencies and (
+        dependencies.get("manifests") or dependencies.get("dependencies")
+    ):
+        print_section(
+            "Dipendenze Rilevate",
+            json.dumps(dependencies, indent=2, ensure_ascii=False),
+        )
+    resolution = result.get("dependency_resolution")
+    if resolution:
+        print_section(
+            "Gestione Dipendenze",
+            json.dumps(resolution, indent=2, ensure_ascii=False),
+        )
     if result.get("token_usage"):
         print_section("Consumo Token", json.dumps(result["token_usage"], indent=2))
     if result.get("cost_estimate"):

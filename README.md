@@ -61,3 +61,21 @@ All migration runs now track prompt and completion tokens per LLM profile.
 The CLI, web UI, and REST API include a breakdown under `token_usage` plus an
 `H100 cost estimate` section that approximates GPU time and cost assuming an
 NVIDIA H100-class instance.
+
+## Dependency planning and alternative evaluation
+
+The migration workflow now inspects common dependency manifests (e.g.
+`package.json`, `pom.xml`, `requirements.txt`) and summarises the declared
+packages before translation begins.  For each dependency the platform asks the
+LLM to:
+
+* provide ready-to-use `wget` URLs or build instructions;
+* list compatible alternatives native to the destination language or framework;
+* outline a translation schedule when no viable replacement exists, complete
+  with multi-day milestones when required.
+
+The resolver attempts to download each dependency under the generated project's
+`third_party/` directory and records the exit status.  Both the dependency
+snapshot and the resolution report are exposed in the CLI output, web UI, and
+REST API responses.  All additional prompts reuse the shared pricing counter so
+token and cost totals automatically include dependency analysis overhead.
