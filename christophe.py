@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional
 from analysis.heuristic_agent import HeuristicAnalysisAgent
 from analysis.semantic_graph import SemanticGraphBuilder
 from core.cache_manager import CacheManager
+from core.cost_model import estimate_h100_receipt
 from core.file_utils import secure_unzip
 from core.llm_service import LLMService
 from migration.recovery_manager import RecoveryManager
@@ -69,6 +70,9 @@ def run_migration(
     cache_manager = cache or CacheManager(Path(".cache/migration_cache.db"))
     close_cache = cache is None
 
+    if hasattr(llm_service, "reset_usage"):
+        llm_service.reset_usage()
+
     logging.info("Starting migration for %%s", zip_path)
 
     with tempfile.TemporaryDirectory(prefix="christophe_") as tmp:
@@ -120,6 +124,13 @@ def run_migration(
             if resource_path.exists():
                 res_migrator.process(resource_path, target_path / "resources")
 
+    token_usage = (
+        llm_service.get_usage_summary()
+        if hasattr(llm_service, "get_usage_summary")
+        else {}
+    )
+    cost_estimate = estimate_h100_receipt(token_usage) if token_usage else {}
+
     if close_cache:
         cache_manager.close()
 
@@ -133,6 +144,8 @@ def run_migration(
         "output_root": output_root,
         "project_name": project_name,
         "recovery_path": recovery_path,
+        "token_usage": token_usage,
+        "cost_estimate": cost_estimate,
     }
 
 
@@ -240,6 +253,14 @@ def create_app(
                 </ul>
                 <p><strong>Classification summary:</strong></p>
                 <pre>{{ result.classification | tojson(indent=2) }}</pre>
+                {% if result.token_usage %}
+                <p><strong>Token usage:</strong></p>
+                <pre>{{ result.token_usage | tojson(indent=2) }}</pre>
+                {% endif %}
+                {% if result.cost_estimate %}
+                <p><strong>H100 cost estimate:</strong></p>
+                <pre>{{ result.cost_estimate | tojson(indent=2) }}</pre>
+                {% endif %}
             </div>
             {% endif %}
             <footer>
@@ -371,6 +392,8 @@ def create_app(
                         "detected_stack": migration["detected_stack"],
                         "plan": migration["plan"],
                         "classification": migration["classification"],
+                        "token_usage": migration.get("token_usage", {}),
+                        "cost_estimate": migration.get("cost_estimate", {}),
                     }
                 except Exception as exc:  # noqa: BLE001 - bubble error to UI and log stack
                     app.logger.exception("Migration failed")
@@ -385,6 +408,77 @@ def create_app(
             result=result_payload,
             defaults=defaults,
         )
+
+    @app.route("/api/migrate", methods=["POST"])
+    def api_migrate():
+        uploaded = (
+            request.files.get("archive")
+            or request.files.get("file")
+            or request.files.get("source_zip")
+        )
+        target_framework = (
+            request.form.get("target_framework")
+            or request.form.get("targetFramework")
+            or request.values.get("target_framework")
+        )
+        target_lang = (
+            request.form.get("target_lang")
+            or request.form.get("targetLanguage")
+            or request.values.get("target_lang")
+            or "java"
+        )
+        src_lang = (
+            request.form.get("src_lang")
+            or request.form.get("source_language")
+            or request.values.get("src_lang")
+        )
+        src_framework = (
+            request.form.get("src_framework")
+            or request.values.get("src_framework")
+        )
+
+        if uploaded is None or uploaded.filename == "":
+            return ({"error": "A ZIP archive must be provided."}, 400)
+        if not uploaded.filename.lower().endswith(".zip"):
+            return ({"error": "The uploaded file must have a .zip extension."}, 400)
+        if not target_framework:
+            return ({"error": "target_framework is required."}, 400)
+
+        suffix = Path(uploaded.filename).suffix or ".zip"
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+                uploaded.save(tmp_file)
+                temp_path = Path(tmp_file.name)
+
+            migration = run_migration(
+                temp_path,
+                target_framework,
+                target_lang,
+                src_lang=src_lang,
+                src_framework=src_framework,
+                reuse_cache=True,
+                output_root=web_output_root,
+                llm=llm_service,
+                cache=cache_manager,
+            )
+        except Exception as exc:  # noqa: BLE001
+            app.logger.exception("API migration failed")
+            return ({"error": str(exc)}, 500)
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
+
+        response = {
+            "project_name": migration["project_name"],
+            "output_path": str(migration["target_path"]),
+            "detected_stack": migration["detected_stack"],
+            "classification": migration["classification"],
+            "plan": migration["plan"],
+            "token_usage": migration.get("token_usage", {}),
+            "cost_estimate": migration.get("cost_estimate", {}),
+        }
+        return response, 200
 
     return app
 
@@ -462,6 +556,10 @@ def main() -> None:
     print_section("Stack Rilevato", json.dumps(result["detected_stack"], indent=2))
     print_section("Piano di Migrazione", "\n".join(result["plan"]))
     print_section("Progetto Migrato", f"Output generato in: {result['target_path']}")
+    if result.get("token_usage"):
+        print_section("Consumo Token", json.dumps(result["token_usage"], indent=2))
+    if result.get("cost_estimate"):
+        print_section("Stima Costi H100", json.dumps(result["cost_estimate"], indent=2))
 
 
 if __name__ == "__main__":
