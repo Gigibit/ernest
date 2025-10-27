@@ -16,11 +16,7 @@ DEFAULT_RESOURCE_PROMPTS: Dict[str, str] = {
     "spring": """
 Adapt the following resource to Spring Boot 3.x conventions.
 Keep all values, adjust only keys or format if needed.
-<<<<<<< HEAD
-Return ONLY the adapted content.
-=======
 Return ONLY the adapted content with no commentary or markdown fences.
->>>>>>> codex/evolve-migration-system-for-complex-frameworks-v7nxyq
 
 --- RESOURCE ({filename}) ---
 {content}
@@ -29,11 +25,7 @@ Return ONLY the adapted content with no commentary or markdown fences.
 Review the following SAP configuration artefact and convert it for an S/4HANA
 landscape. Highlight required CDS artifacts, rename deprecated fields and keep
 the original semantics intact.
-<<<<<<< HEAD
-Return ONLY the adapted configuration.
-=======
 Return ONLY the adapted configuration with no commentary or markdown fences.
->>>>>>> codex/evolve-migration-system-for-complex-frameworks-v7nxyq
 
 --- RESOURCE ({filename}) ---
 {content}
@@ -42,11 +34,7 @@ Return ONLY the adapted configuration with no commentary or markdown fences.
 Migrate the following front-end configuration or asset for a modern React
 tooling stack (Vite + TypeScript + ESLint). Preserve the behaviour while using
 current best practices.
-<<<<<<< HEAD
-Return ONLY the adapted content.
-=======
 Return ONLY the adapted content with no commentary or markdown fences.
->>>>>>> codex/evolve-migration-system-for-complex-frameworks-v7nxyq
 
 --- RESOURCE ({filename}) ---
 {content}
@@ -82,14 +70,6 @@ class ResourceMigrator:
         cache_key = self.llm.prompt_hash("adapt", f"{profile}::{prompt}")
         cached = self.cache.get(cache_key)
         if cached is not None:
-<<<<<<< HEAD
-            target.write_text(cached, encoding="utf-8")
-            return target
-
-        out = self.llm.invoke("adapt", prompt, max_new_tokens=1024)
-        self.cache.set(cache_key, out)
-        target.write_text(out, encoding="utf-8")
-=======
             cleaned = self._clean_generation(cached)
             target.write_text(cleaned, encoding="utf-8")
             return target
@@ -98,7 +78,6 @@ class ResourceMigrator:
         cleaned = self._clean_generation(out)
         self.cache.set(cache_key, cleaned)
         target.write_text(cleaned, encoding="utf-8")
->>>>>>> codex/evolve-migration-system-for-complex-frameworks-v7nxyq
         return target
 
     @staticmethod

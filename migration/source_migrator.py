@@ -4,10 +4,7 @@
 from __future__ import annotations
 
 import logging
-<<<<<<< HEAD
-=======
 import re
->>>>>>> codex/evolve-migration-system-for-complex-frameworks-v7nxyq
 from pathlib import Path
 from typing import Dict, Iterable, Mapping, MutableMapping
 
@@ -171,7 +168,6 @@ class SourceMigrator:
             cache_key = self.llm.prompt_hash(strategy.profile, prompt)
             cached = self.cache.get(cache_key)
             if cached is not None:
-<<<<<<< HEAD
                 translated_parts.append(cached)
                 continue
 
@@ -180,7 +176,6 @@ class SourceMigrator:
             translated_parts.append(response)
 
         return translated_parts
-=======
                 translated_parts.append(self._clean_generation(cached))
                 continue
 
@@ -212,5 +207,4 @@ class SourceMigrator:
             flags=re.IGNORECASE,
         )
         return stripped.strip()
->>>>>>> codex/evolve-migration-system-for-complex-frameworks-v7nxyq
 
