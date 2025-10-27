@@ -1,6 +1,14 @@
 # core/llm_service.py
 import logging, hashlib
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+
+from core.env import load_env_file
+
+# Ensure environment variables from a local .env file are available before any
+# Hugging Face models are downloaded. This allows users to provide HF tokens
+# without relying on ``huggingface-cli login``.
+load_env_file()
 
 class LLMService:
     def __init__(self, profiles):
