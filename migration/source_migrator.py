@@ -168,6 +168,14 @@ class SourceMigrator:
             cache_key = self.llm.prompt_hash(strategy.profile, prompt)
             cached = self.cache.get(cache_key)
             if cached is not None:
+                translated_parts.append(cached)
+                continue
+
+            response = self.llm.invoke(strategy.profile, prompt, **llm_overrides)
+            self.cache.set(cache_key, response)
+            translated_parts.append(response)
+
+        return translated_parts
                 translated_parts.append(self._clean_generation(cached))
                 continue
 
