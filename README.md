@@ -37,3 +37,11 @@ translation.
 The Flask interface now exposes *Pagination size* and *Refinement passes*
 inputs next to the file uploader, so you can experiment with progressive
 refinements directly from the browser.
+
+## Automatic strategy selection
+
+`christophe.py` now inspects both the detected source stack and individual file
+extensions to fan out to the correct migration strategy. COBOL artefacts are
+still mapped to Java, but Python/Django modules, AngularJS components and ABAP
+programs automatically invoke the dedicated translation pipelines without extra
+flags.

@@ -30,6 +30,50 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
 }
 
 
+def _normalise_hint(value: Optional[str]) -> str:
+    return value.lower().strip() if value else ""
+
+
+def _hint_contains(hint: str, *needles: str) -> bool:
+    return any(needle in hint for needle in needles if needle)
+
+
+def _strategy_for_file(path: Path, detected_stack: Dict[str, Optional[str]]) -> tuple[str, str]:
+    """Infer the translation strategy and destination suffix for ``path``.
+
+    The heuristic combines file extensions with the detected language/framework so
+    we can fan out to the appropriate migration pipeline without hard-coding the
+    COBOL→Java path.
+    """
+
+    ext = path.suffix.lower()
+    language_hint = _normalise_hint(detected_stack.get("language"))
+    framework_hint = _normalise_hint(detected_stack.get("framework"))
+
+    if ext in {".cbl", ".cob", ".cpy"} or _hint_contains(
+        language_hint, "cobol"
+    ) or _hint_contains(framework_hint, "cobol"):
+        return "cobol_to_java", ".java"
+
+    if ext == ".py" or _hint_contains(language_hint, "python") or _hint_contains(
+        framework_hint, "django", "python"
+    ):
+        return "python_to_spring", ".java"
+
+    if ext in {".js", ".ts", ".html"} and (
+        _hint_contains(framework_hint, "angular", "angularjs")
+        or _hint_contains(language_hint, "angular", "angularjs")
+    ):
+        return "angularjs_to_react", ".tsx"
+
+    if ext in {".abap", ".aba"} or _hint_contains(
+        language_hint, "abap"
+    ) or _hint_contains(framework_hint, "sap", "s/4", "s4hana", "abap"):
+        return "abap_to_s4", ".abap"
+
+    return "cobol_to_java", ".java"
+
+
 def print_section(title: str, content: str) -> None:
     line = "-" * (len(title) + 8)
     print(f"\n--- {title.upper()} ---\n{content}\n{line}")
@@ -107,8 +151,20 @@ def run_migration(
                 recovery.mark_skipped(src)
                 continue
 
-            destination = target_path / "src" / Path(src).with_suffix(".java").name
-            src_migrator.translate_cobol(
+            strategy_key, destination_suffix = _strategy_for_file(
+                Path(src), detected_stack
+            )
+            destination = target_path / "src" / Path(src).with_suffix(
+                destination_suffix
+            ).name
+            logging.info(
+                "Using strategy %s for %s (dest: %s)",
+                strategy_key,
+                src,
+                destination_suffix,
+            )
+            src_migrator.translate(
+                strategy_key,
                 source_file,
                 destination,
                 page_size=page_size,
