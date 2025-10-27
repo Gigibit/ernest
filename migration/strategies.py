@@ -81,7 +81,13 @@ class TranslationStrategy:
             f"{self.instructions.strip()}"
             f"{context_snippet}\n\n"
             f"SOURCE CHUNK [{chunk_index}]:\n{chunk}\n\n"
+<<<<<<< HEAD
             f"Return ONLY {self.target_language.strip()}."
+=======
+            f"Return ONLY {self.target_language.strip()} with no commentary,"
+            f" TODO markers, or markdown fences. Ensure the output compiles"
+            f" cleanly."
+>>>>>>> codex/evolve-migration-system-for-complex-frameworks-v7nxyq
         )
 
 

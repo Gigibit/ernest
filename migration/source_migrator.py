@@ -4,6 +4,10 @@
 from __future__ import annotations
 
 import logging
+<<<<<<< HEAD
+=======
+import re
+>>>>>>> codex/evolve-migration-system-for-complex-frameworks-v7nxyq
 from pathlib import Path
 from typing import Dict, Iterable, Mapping, MutableMapping
 
@@ -167,6 +171,7 @@ class SourceMigrator:
             cache_key = self.llm.prompt_hash(strategy.profile, prompt)
             cached = self.cache.get(cache_key)
             if cached is not None:
+<<<<<<< HEAD
                 translated_parts.append(cached)
                 continue
 
@@ -175,4 +180,37 @@ class SourceMigrator:
             translated_parts.append(response)
 
         return translated_parts
+=======
+                translated_parts.append(self._clean_generation(cached))
+                continue
+
+            response = self.llm.invoke(strategy.profile, prompt, **llm_overrides)
+            cleaned = self._clean_generation(response)
+            self.cache.set(cache_key, cleaned)
+            translated_parts.append(cleaned)
+
+        return translated_parts
+
+    @staticmethod
+    def _clean_generation(text: str) -> str:
+        """Normalise LLM output by removing fences and boilerplate."""
+
+        if text is None:
+            return ""
+
+        stripped = text.strip()
+        fence_blocks = re.findall(r"```(?:[\w+-]*)\n([\s\S]*?)\n```", stripped)
+        if fence_blocks:
+            stripped = max(fence_blocks, key=len).strip()
+
+        stripped = re.sub(r"^```(?:[\w+-]*)\s*", "", stripped)
+        stripped = re.sub(r"\s*```$", "", stripped)
+        stripped = re.sub(
+            r"^(?:Here is the (?:updated|translated) (?:file|code)|Updated code|Output|Result)\s*:?\s*",
+            "",
+            stripped,
+            flags=re.IGNORECASE,
+        )
+        return stripped.strip()
+>>>>>>> codex/evolve-migration-system-for-complex-frameworks-v7nxyq
 
