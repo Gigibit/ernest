@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Dict, Iterable, Mapping, MutableMapping, Sequence
+from typing import Dict, Iterable, Mapping, MutableMapping
 
 from .strategies import DEFAULT_STRATEGIES, TranslationStrategy
 
