@@ -54,8 +54,15 @@ def run_migration(
     output_root: Optional[Path] = None,
     llm: Optional[LLMService] = None,
     cache: Optional[CacheManager] = None,
+    page_size: Optional[int] = None,
+    refine_passes: int = 0,
 ) -> Dict[str, Any]:
-    """Execute the full migration pipeline for ``zip_path``."""
+    """Execute the full migration pipeline for ``zip_path``.
+
+    When ``page_size`` is provided the translation of each source artefact is
+    paginated to avoid overloading the model context window.  ``refine_passes``
+    controls how many iterative polishing rounds are executed for every page.
+    """
 
     output_root = output_root or Path("output_project")
     llm_service = llm or LLMService(DEFAULT_PROFILES)
@@ -101,7 +108,12 @@ def run_migration(
                 continue
 
             destination = target_path / "src" / Path(src).with_suffix(".java").name
-            src_migrator.translate_cobol(source_file, destination)
+            src_migrator.translate_cobol(
+                source_file,
+                destination,
+                page_size=page_size,
+                refine_passes=refine_passes,
+            )
 
         for res in classification.get("resource", []):
             resource_path = temp_dir / res
@@ -187,6 +199,14 @@ def create_app(
                 <div>
                     <label for="src_framework">Source framework (optional)</label>
                     <input id="src_framework" name="src_framework" type="text" value="{{ defaults.src_framework }}" placeholder="e.g. SAP ECC">
+                </div>
+                <div>
+                    <label for="page_size">Pagination size (chunks per pass)</label>
+                    <input id="page_size" name="page_size" type="number" min="0" step="1" value="{{ defaults.page_size }}" placeholder="e.g. 5">
+                </div>
+                <div>
+                    <label for="refine_passes">Refinement passes per page</label>
+                    <input id="refine_passes" name="refine_passes" type="number" min="0" step="1" value="{{ defaults.refine_passes }}" placeholder="e.g. 1">
                 </div>
                 <div class="drop-zone" id="drop-zone">
                     <p id="drop-zone-text">Drag &amp; drop your source ZIP or click to browse</p>
@@ -285,6 +305,8 @@ def create_app(
             "target_lang": request.form.get("target_lang", "java"),
             "src_lang": request.form.get("src_lang", ""),
             "src_framework": request.form.get("src_framework", ""),
+            "page_size": request.form.get("page_size", ""),
+            "refine_passes": request.form.get("refine_passes", "0"),
         }
 
         if request.method == "POST":
@@ -292,6 +314,10 @@ def create_app(
             target_lang = defaults["target_lang"].strip() or "java"
             src_lang = defaults["src_lang"].strip() or None
             src_framework = defaults["src_framework"].strip() or None
+            page_size_value = defaults["page_size"].strip()
+            refine_passes_value = defaults["refine_passes"].strip()
+            page_size_int: Optional[int] = None
+            refine_passes_int = 0
             uploaded = request.files.get("source_zip")
 
             if not target_framework:
@@ -300,6 +326,23 @@ def create_app(
                 errors.append("You must upload a ZIP archive.")
             elif not uploaded.filename.lower().endswith(".zip"):
                 errors.append("Uploaded file must have .zip extension.")
+
+            if page_size_value:
+                try:
+                    page_size_int = int(page_size_value)
+                    if page_size_int < 0:
+                        raise ValueError
+                    if page_size_int == 0:
+                        page_size_int = None
+                except ValueError:
+                    errors.append("Pagination size must be a non-negative integer.")
+            if refine_passes_value:
+                try:
+                    refine_passes_int = int(refine_passes_value)
+                    if refine_passes_int < 0:
+                        raise ValueError
+                except ValueError:
+                    errors.append("Refinement passes must be a non-negative integer.")
 
             if not errors and uploaded:
                 filename = secure_filename(uploaded.filename)
@@ -319,6 +362,8 @@ def create_app(
                         output_root=web_output_root,
                         llm=llm_service,
                         cache=cache_manager,
+                        page_size=page_size_int,
+                        refine_passes=refine_passes_int,
                     )
                     result_payload = {
                         "project_name": migration["project_name"],
@@ -358,6 +403,18 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1", help="Host for the web interface when --serve is used.")
     parser.add_argument("--port", type=int, default=5000, help="Port for the web interface when --serve is used.")
     parser.add_argument("--debug", action="store_true", help="Enable Flask debug mode when serving the web UI.")
+    parser.add_argument(
+        "--page-size",
+        type=int,
+        default=None,
+        help="Number of source chunks to translate per LLM call page. Use 0 to disable pagination.",
+    )
+    parser.add_argument(
+        "--refine-passes",
+        type=int,
+        default=0,
+        help="How many refinement passes to run for each translated page.",
+    )
 
     args = parser.parse_args()
 
@@ -378,9 +435,14 @@ def main() -> None:
         parser.error("zip_path is required unless --serve is specified")
     if not args.target_framework:
         parser.error("--target-framework is required when running the CLI workflow")
+    if args.page_size is not None and args.page_size < 0:
+        parser.error("--page-size must be >= 0")
+    if args.refine_passes < 0:
+        parser.error("--refine-passes must be >= 0")
 
     llm, cache = build_services()
     try:
+        page_size = args.page_size if args.page_size not in (None, 0) else None
         result = run_migration(
             args.zip_path,
             args.target_framework,
@@ -390,6 +452,8 @@ def main() -> None:
             reuse_cache=args.reuse_cache,
             llm=llm,
             cache=cache,
+            page_size=page_size,
+            refine_passes=args.refine_passes,
         )
     finally:
         cache.close()

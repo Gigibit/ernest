@@ -39,6 +39,16 @@ class TranslationStrategy:
     context_labels:
         Optional mapping to format contextual metadata in the prompt (e.g.
         DATA DIVISION for COBOL programs).
+    refine_instructions:
+        Optional instructions used for refinement passes.  When provided the
+        translated output of a page is sent back to the LLM with these
+        instructions to polish the result.
+    refine_profile:
+        Optional profile override used during refinement passes.  Defaults to
+        :attr:`profile` when omitted.
+    refine_max_new_tokens:
+        ``max_new_tokens`` hint used during refinement.  Falls back to
+        :attr:`max_new_tokens` when not provided.
     """
 
     name: str
@@ -48,6 +58,9 @@ class TranslationStrategy:
     chunk_size: int = 300
     max_new_tokens: int = 2048
     context_labels: Mapping[str, str] = field(default_factory=dict)
+    refine_instructions: str | None = None
+    refine_profile: str | None = None
+    refine_max_new_tokens: int | None = None
 
     def build_prompt(self, chunk: str, chunk_index: int, context: Mapping[str, str]) -> str:
         """Compose the prompt for a single chunk.
@@ -64,6 +77,39 @@ class TranslationStrategy:
             truthy are included in the final prompt.
         """
 
+        return (
+            f"{self.instructions.strip()}"
+            f"{self._format_context(context)}\n\n"
+            f"SOURCE CHUNK [{chunk_index}]:\n{chunk}\n\n"
+            f"Return ONLY {self.target_language.strip()} with no commentary,"
+            f" TODO markers, or markdown fences. Ensure the output compiles"
+            f" cleanly."
+        )
+
+    def build_refinement_prompt(
+        self,
+        page_text: str,
+        page_index: int,
+        context: Mapping[str, str],
+        iteration: int,
+    ) -> str:
+        """Compose the refinement prompt for a translated page."""
+
+        base_instructions = (
+            self.refine_instructions
+            or "Review the migrated output below and improve it without"
+            " regressing behaviour."
+        )
+
+        return (
+            f"{base_instructions.strip()}"
+            f"{self._format_context(context)}\n\n"
+            f"MIGRATED PAGE [{page_index}] PASS {iteration + 1}:\n{page_text}\n\n"
+            f"Return ONLY polished {self.target_language.strip()} without"
+            f" commentary, TODO markers, or markdown fences."
+        )
+
+    def _format_context(self, context: Mapping[str, str]) -> str:
         sections = []
         for key, label in self.context_labels.items():
             value = context.get(key)
@@ -74,18 +120,11 @@ class TranslationStrategy:
             if key not in self.context_labels and value:
                 sections.append(f"{key}:\n{value}")
 
-        context_block = "\n\n".join(sections)
-        context_snippet = f"\n\n{context_block}" if context_block else ""
+        if not sections:
+            return ""
 
-        return (
-            f"{self.instructions.strip()}"
-            f"{context_snippet}\n\n"
-            f"SOURCE CHUNK [{chunk_index}]:\n{chunk}\n\n"
-            f"Return ONLY {self.target_language.strip()} with no commentary,"
-            f" TODO markers, or markdown fences. Ensure the output compiles"
-            f" cleanly."
-            f"Return ONLY {self.target_language.strip()}."
-        )
+        return "\n\n" + "\n\n".join(sections)
+
 
 
 class CobolToSpringStrategy(TranslationStrategy):
@@ -106,6 +145,13 @@ class CobolToSpringStrategy(TranslationStrategy):
                 "data_division": "DATA DIVISION",
                 "fd_summary": "FILE DESCRIPTORS",
             },
+            refine_instructions=(
+                "Rivedi il blocco Java risultante, elimina ridondanze, migliora "
+                "nomi e strutture Spring Boot e assicurati che il codice sia "
+                "pronto alla compilazione senza TODO o commenti superflui."
+            ),
+            refine_profile="translate",
+            refine_max_new_tokens=3072,
         )
 
 
@@ -126,6 +172,13 @@ class PythonDjangoToSpringStrategy(TranslationStrategy):
             context_labels={
                 "project_settings": "DJANGO SETTINGS SUMMARY",
             },
+            refine_instructions=(
+                "Controlla il codice Java Spring generato e ottimizza mapping, "
+                "annotazioni e gestione eccezioni mantenendo il comportamento "
+                "originario."
+            ),
+            refine_profile="translate",
+            refine_max_new_tokens=3072,
         )
 
 
@@ -146,6 +199,12 @@ class AngularJsToReactStrategy(TranslationStrategy):
             context_labels={
                 "shared_services": "ANGULARJS SERVICES",
             },
+            refine_instructions=(
+                "Affina il componente React risultante garantendo tipizzazione "
+                "solida, hooks puliti e nessun residuo AngularJS."
+            ),
+            refine_profile="translate",
+            refine_max_new_tokens=2048,
         )
 
 
@@ -167,6 +226,12 @@ class AbapToS4HanaStrategy(TranslationStrategy):
                 "ddic_metadata": "DDIC METADATA",
                 "integration_notes": "INTEGRATION NOTES",
             },
+            refine_instructions=(
+                "Rifinisci la logica ABAP per allinearla agli standard S/4HANA, "
+                "migliora la dichiarazione di tipi, CDS e chiamate BAPI/ODATA."
+            ),
+            refine_profile="sap",
+            refine_max_new_tokens=2560,
         )
 
 

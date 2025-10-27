@@ -41,6 +41,9 @@ class SourceMigrator:
         strategy_key: str,
         src: Path,
         dst: Path,
+        *,
+        page_size: int | None = None,
+        refine_passes: int = 0,
         **context,
     ) -> Path:
         """Run the translation pipeline using ``strategy_key``.
@@ -68,10 +71,45 @@ class SourceMigrator:
         llm_overrides.setdefault("max_new_tokens", strategy.max_new_tokens)
 
         try:
-            chunks = self._chunk_source(src, strategy.chunk_size)
-            translated_parts = self._translate_chunks(
-                strategy, chunks, context, llm_overrides
-            )
+            chunks = list(self._chunk_source(src, strategy.chunk_size))
+            if not chunks:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                dst.write_text("", encoding="utf-8")
+                if self.recovery:
+                    self.recovery.mark_completed(str(src))
+                logging.info(
+                    "Translated %s -> %s using %s (empty source)",
+                    src,
+                    dst,
+                    strategy.name,
+                )
+                return dst
+
+            translated_parts = []
+            for page_number, (start, end) in enumerate(
+                self._paginate_indices(len(chunks), page_size)
+            ):
+                page_translations = self._translate_page(
+                    strategy,
+                    chunks,
+                    start,
+                    end,
+                    context,
+                    llm_overrides,
+                )
+
+                if refine_passes > 0:
+                    refined = self._refine_page(
+                        strategy,
+                        page_translations,
+                        page_number,
+                        context,
+                        llm_overrides,
+                        refine_passes,
+                    )
+                    translated_parts.append(refined)
+                else:
+                    translated_parts.extend(page_translations)
 
             dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_text("\n\n".join(translated_parts), encoding="utf-8")
@@ -92,6 +130,9 @@ class SourceMigrator:
         dst: Path,
         data_division: str = "",
         fd_summary: str = "",
+        *,
+        page_size: int | None = None,
+        refine_passes: int = 0,
     ) -> Path:
         return self.translate(
             "cobol_to_java",
@@ -99,6 +140,8 @@ class SourceMigrator:
             dst,
             data_division=data_division,
             fd_summary=fd_summary,
+            page_size=page_size,
+            refine_passes=refine_passes,
         )
 
     def translate_python_module(
@@ -106,12 +149,17 @@ class SourceMigrator:
         src: Path,
         dst: Path,
         project_settings: str | None = None,
+        *,
+        page_size: int | None = None,
+        refine_passes: int = 0,
     ) -> Path:
         return self.translate(
             "python_to_spring",
             src,
             dst,
             project_settings=project_settings or "",
+            page_size=page_size,
+            refine_passes=refine_passes,
         )
 
     def translate_angular_component(
@@ -119,12 +167,17 @@ class SourceMigrator:
         src: Path,
         dst: Path,
         shared_services: str | None = None,
+        *,
+        page_size: int | None = None,
+        refine_passes: int = 0,
     ) -> Path:
         return self.translate(
             "angularjs_to_react",
             src,
             dst,
             shared_services=shared_services or "",
+            page_size=page_size,
+            refine_passes=refine_passes,
         )
 
     def translate_abap(
@@ -133,6 +186,9 @@ class SourceMigrator:
         dst: Path,
         ddic_metadata: str | None = None,
         integration_notes: str | None = None,
+        *,
+        page_size: int | None = None,
+        refine_passes: int = 0,
     ) -> Path:
         return self.translate(
             "abap_to_s4",
@@ -140,6 +196,8 @@ class SourceMigrator:
             dst,
             ddic_metadata=ddic_metadata or "",
             integration_notes=integration_notes or "",
+            page_size=page_size,
+            refine_passes=refine_passes,
         )
 
     # Internal helpers -----------------------------------------------------
@@ -155,27 +213,22 @@ class SourceMigrator:
             for i in range(0, len(lines), chunk_size)
         ]
 
-    def _translate_chunks(
+    def _translate_page(
         self,
         strategy: TranslationStrategy,
-        chunks: Iterable[str],
+        chunks: Sequence[str],
+        start: int,
+        end: int,
         context: Mapping[str, str],
         llm_overrides: MutableMapping[str, object],
-    ) -> Iterable[str]:
-        translated_parts = []
-        for idx, chunk in enumerate(chunks):
+    ) -> list[str]:
+        translated_parts: list[str] = []
+        for idx in range(start, end):
+            chunk = chunks[idx]
             prompt = strategy.build_prompt(chunk, idx, context)
             cache_key = self.llm.prompt_hash(strategy.profile, prompt)
             cached = self.cache.get(cache_key)
             if cached is not None:
-                translated_parts.append(cached)
-                continue
-
-            response = self.llm.invoke(strategy.profile, prompt, **llm_overrides)
-            self.cache.set(cache_key, response)
-            translated_parts.append(response)
-
-        return translated_parts
                 translated_parts.append(self._clean_generation(cached))
                 continue
 
@@ -185,6 +238,40 @@ class SourceMigrator:
             translated_parts.append(cleaned)
 
         return translated_parts
+
+    def _refine_page(
+        self,
+        strategy: TranslationStrategy,
+        page_translations: Iterable[str],
+        page_number: int,
+        context: Mapping[str, str],
+        llm_overrides: Mapping[str, object],
+        passes: int,
+    ) -> str:
+        current = "\n\n".join(page_translations)
+        profile = strategy.refine_profile or strategy.profile
+        overrides = dict(llm_overrides)
+        overrides.setdefault(
+            "max_new_tokens",
+            strategy.refine_max_new_tokens or strategy.max_new_tokens,
+        )
+
+        for iteration in range(passes):
+            prompt = strategy.build_refinement_prompt(
+                current, page_number, context, iteration
+            )
+            cache_key = self.llm.prompt_hash(profile, prompt)
+            cached = self.cache.get(cache_key)
+            if cached is not None:
+                current = self._clean_generation(cached)
+                continue
+
+            response = self.llm.invoke(profile, prompt, **overrides)
+            cleaned = self._clean_generation(response)
+            self.cache.set(cache_key, cleaned)
+            current = cleaned
+
+        return current
 
     @staticmethod
     def _clean_generation(text: str) -> str:
@@ -207,4 +294,17 @@ class SourceMigrator:
             flags=re.IGNORECASE,
         )
         return stripped.strip()
+
+    @staticmethod
+    def _paginate_indices(total: int, page_size: int | None) -> Iterable[tuple[int, int]]:
+        if total <= 0:
+            return []
+
+        if not page_size or page_size <= 0 or page_size >= total:
+            return [(0, total)]
+
+        return [
+            (start, min(start + page_size, total))
+            for start in range(0, total, page_size)
+        ]
 
