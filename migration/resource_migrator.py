@@ -13,28 +13,29 @@ BIN_EXT = {".png", ".jpg", ".jpeg", ".gif", ".ico", ".db", ".sqlite", ".bin", ".
 
 
 DEFAULT_RESOURCE_PROMPTS: Dict[str, str] = {
-    "spring": """
-Adapt the following resource to Spring Boot 3.x conventions.
-Keep all values, adjust only keys or format if needed.
-Return ONLY the adapted content with no commentary or markdown fences.
+    "backend": """
+Reconcile the following resource with the conventions of the destination
+service platform. Keep behaviours intact, align naming and structure with the
+target runtime, and avoid introducing placeholder content.
+Return ONLY the adapted artefact with no commentary or markdown fences.
 
 --- RESOURCE ({filename}) ---
 {content}
 """,
-    "s4hana": """
-Review the following SAP configuration artefact and convert it for an S/4HANA
-landscape. Highlight required CDS artifacts, rename deprecated fields and keep
-the original semantics intact.
-Return ONLY the adapted configuration with no commentary or markdown fences.
+    "enterprise": """
+Review the following enterprise configuration or extension and reshape it so it
+fits a modular, cloud-oriented core. Indica eventuali personalizzazioni da
+isolare, aggiorna nomenclature obsolete e preserva la semantica originale.
+Return ONLY the adapted artefact with no commentary or markdown fences.
 
 --- RESOURCE ({filename}) ---
 {content}
 """,
-    "react": """
-Migrate the following front-end configuration or asset for a modern React
-tooling stack (Vite + TypeScript + ESLint). Preserve the behaviour while using
-current best practices.
-Return ONLY the adapted content with no commentary or markdown fences.
+    "component_ui": """
+Porta il seguente asset front-end verso uno stack component-based moderno.
+Allinea build tooling, tipizzazione e convenzioni senza alterare il risultato
+visivo o funzionale.
+Return ONLY the adapted artefact with no commentary or markdown fences.
 
 --- RESOURCE ({filename}) ---
 {content}
@@ -55,7 +56,7 @@ class ResourceMigrator:
             resource_prompts or DEFAULT_RESOURCE_PROMPTS
         )
 
-    def process(self, src: Path, dst_dir: Path, profile: str = "spring") -> Path:
+    def process(self, src: Path, dst_dir: Path, profile: str = "backend") -> Path:
         dst_dir.mkdir(parents=True, exist_ok=True)
         target = dst_dir / src.name
         ext = src.suffix.lower()
@@ -64,7 +65,7 @@ class ResourceMigrator:
             shutil.copy(src, target)
             return target
 
-        template = self.resource_prompts.get(profile, self.resource_prompts["spring"])
+        template = self.resource_prompts.get(profile, self.resource_prompts["backend"])
         content = src.read_text(encoding="utf-8", errors="ignore")
         prompt = template.format(filename=src.name, content=content)
         cache_key = self.llm.prompt_hash("adapt", f"{profile}::{prompt}")

@@ -30,50 +30,6 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
 }
 
 
-def _normalise_hint(value: Optional[str]) -> str:
-    return value.lower().strip() if value else ""
-
-
-def _hint_contains(hint: str, *needles: str) -> bool:
-    return any(needle in hint for needle in needles if needle)
-
-
-def _strategy_for_file(path: Path, detected_stack: Dict[str, Optional[str]]) -> tuple[str, str]:
-    """Infer the translation strategy and destination suffix for ``path``.
-
-    The heuristic combines file extensions with the detected language/framework so
-    we can fan out to the appropriate migration pipeline without hard-coding the
-    COBOL→Java path.
-    """
-
-    ext = path.suffix.lower()
-    language_hint = _normalise_hint(detected_stack.get("language"))
-    framework_hint = _normalise_hint(detected_stack.get("framework"))
-
-    if ext in {".cbl", ".cob", ".cpy"} or _hint_contains(
-        language_hint, "cobol"
-    ) or _hint_contains(framework_hint, "cobol"):
-        return "cobol_to_java", ".java"
-
-    if ext == ".py" or _hint_contains(language_hint, "python") or _hint_contains(
-        framework_hint, "django", "python"
-    ):
-        return "python_to_spring", ".java"
-
-    if ext in {".js", ".ts", ".html"} and (
-        _hint_contains(framework_hint, "angular", "angularjs")
-        or _hint_contains(language_hint, "angular", "angularjs")
-    ):
-        return "angularjs_to_react", ".tsx"
-
-    if ext in {".abap", ".aba"} or _hint_contains(
-        language_hint, "abap"
-    ) or _hint_contains(framework_hint, "sap", "s/4", "s4hana", "abap"):
-        return "abap_to_s4", ".abap"
-
-    return "cobol_to_java", ".java"
-
-
 def print_section(title: str, content: str) -> None:
     line = "-" * (len(title) + 8)
     print(f"\n--- {title.upper()} ---\n{content}\n{line}")
@@ -151,20 +107,8 @@ def run_migration(
                 recovery.mark_skipped(src)
                 continue
 
-            strategy_key, destination_suffix = _strategy_for_file(
-                Path(src), detected_stack
-            )
-            destination = target_path / "src" / Path(src).with_suffix(
-                destination_suffix
-            ).name
-            logging.info(
-                "Using strategy %s for %s (dest: %s)",
-                strategy_key,
-                src,
-                destination_suffix,
-            )
-            src_migrator.translate(
-                strategy_key,
+            destination = target_path / "src" / Path(src).with_suffix(".java").name
+            src_migrator.translate_legacy_backend(
                 source_file,
                 destination,
                 page_size=page_size,
@@ -242,7 +186,7 @@ def create_app(
             <form method="post" enctype="multipart/form-data">
                 <div>
                     <label for="target_framework">Target framework</label>
-                    <input id="target_framework" name="target_framework" type="text" value="{{ defaults.target_framework }}" placeholder="e.g. Spring Boot">
+                    <input id="target_framework" name="target_framework" type="text" value="{{ defaults.target_framework }}" placeholder="e.g. modern service platform">
                 </div>
                 <div>
                     <label for="target_lang">Target language</label>
@@ -250,11 +194,11 @@ def create_app(
                 </div>
                 <div>
                     <label for="src_lang">Source language (optional)</label>
-                    <input id="src_lang" name="src_lang" type="text" value="{{ defaults.src_lang }}" placeholder="e.g. COBOL">
+                    <input id="src_lang" name="src_lang" type="text" value="{{ defaults.src_lang }}" placeholder="e.g. legacy batch language">
                 </div>
                 <div>
                     <label for="src_framework">Source framework (optional)</label>
-                    <input id="src_framework" name="src_framework" type="text" value="{{ defaults.src_framework }}" placeholder="e.g. SAP ECC">
+                    <input id="src_framework" name="src_framework" type="text" value="{{ defaults.src_framework }}" placeholder="e.g. on-prem enterprise platform">
                 </div>
                 <div>
                     <label for="page_size">Pagination size (chunks per pass)</label>

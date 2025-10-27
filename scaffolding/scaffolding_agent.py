@@ -12,22 +12,28 @@ from pathlib import Path
 from typing import Dict, Iterable, Mapping
 
 
+_SERVICE_HINTS = (
+    "Include build tooling aligned with the chosen language/runtime",
+    "Expose configuration templates with environment placeholders",
+    "Provide containerisation or deployment descriptors for reproducibility",
+)
+
+_COMPONENT_UI_HINTS = (
+    "Set up a modern bundler with TypeScript support",
+    "Configure linting and formatting with opinionated defaults",
+    "Ship a lightweight unit testing scaffold",
+)
+
+_ENTERPRISE_CORE_HINTS = (
+    "Definisci una struttura a moduli che separi estensioni dal nucleo standard",
+    "Includi script di automazione per build e delivery controllata",
+    "Documenta prerequisiti e dipendenze esterne richieste",
+)
+
 DEFAULT_FRAMEWORK_HINTS: Dict[str, Iterable[str]] = {
-    "spring boot": (
-        "Include Maven Wrapper with Java 21 settings",
-        "Configure application.yml with sensible defaults",
-        "Provide a Dockerfile targeting Eclipse Temurin",
-    ),
-    "react": (
-        "Use Vite with TypeScript",
-        "Configure ESLint + Prettier",
-        "Include Vitest setup for unit testing",
-    ),
-    "sap s/4hana": (
-        "Structure the project for SAP BTP ABAP Environment",
-        "Provide package.json with UI5 tooling if relevant",
-        "Document required transport requests",
-    ),
+    "modern service stack": _SERVICE_HINTS,
+    "component ui stack": _COMPONENT_UI_HINTS,
+    "enterprise core modernisation": _ENTERPRISE_CORE_HINTS,
 }
 
 
@@ -46,7 +52,20 @@ class ScaffoldingAgent:
         }
 
     def _build_prompt(self, framework: str, language: str) -> str:
-        hints = self.framework_hints.get(framework.lower(), ())
+        normalized = framework.lower()
+        hints = self.framework_hints.get(normalized)
+        if hints is None:
+            keyword_map = {
+                "modern service stack": ("service", "backend", "api"),
+                "component ui stack": ("component", "frontend", "ui"),
+                "enterprise core modernisation": ("enterprise", "core", "erp"),
+            }
+            for key, keywords in keyword_map.items():
+                if any(word in normalized for word in keywords):
+                    hints = self.framework_hints.get(key)
+                    if hints:
+                        break
+        hints = hints or ()
         hints_block = "".join(f"- {hint}\n" for hint in hints)
         return textwrap.dedent(
             f"""

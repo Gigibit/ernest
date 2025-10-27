@@ -58,8 +58,8 @@ class SourceMigrator:
         dst:
             Destination path where the translated artefact will be written.
         context:
-            Optional metadata passed to the prompt (e.g. DATA DIVISION for COBOL,
-            Django settings, Angular services).  The ``llm_overrides`` key can be
+            Optional metadata passed to the prompt (e.g. legacy structure outlines,
+            runtime settings, shared dependencies).  The ``llm_overrides`` key can be
             used to pass keyword arguments to :meth:`core.llm_service.LLMService.invoke`.
         """
 
@@ -124,77 +124,77 @@ class SourceMigrator:
             raise
 
     # Convenience wrappers -------------------------------------------------
-    def translate_cobol(
+    def translate_legacy_backend(
         self,
         src: Path,
         dst: Path,
-        data_division: str = "",
-        fd_summary: str = "",
+        structure_outline: str = "",
+        integration_contracts: str = "",
         *,
         page_size: int | None = None,
         refine_passes: int = 0,
     ) -> Path:
         return self.translate(
-            "cobol_to_java",
+            "legacy_backend_to_services",
             src,
             dst,
-            data_division=data_division,
-            fd_summary=fd_summary,
+            structure_outline=structure_outline,
+            integration_contracts=integration_contracts,
             page_size=page_size,
             refine_passes=refine_passes,
         )
 
-    def translate_python_module(
+    def translate_dynamic_web_module(
         self,
         src: Path,
         dst: Path,
-        project_settings: str | None = None,
+        runtime_configuration: str | None = None,
         *,
         page_size: int | None = None,
         refine_passes: int = 0,
     ) -> Path:
         return self.translate(
-            "python_to_spring",
+            "dynamic_web_to_structured_backend",
             src,
             dst,
-            project_settings=project_settings or "",
+            runtime_configuration=runtime_configuration or "",
             page_size=page_size,
             refine_passes=refine_passes,
         )
 
-    def translate_angular_component(
+    def translate_client_component(
         self,
         src: Path,
         dst: Path,
-        shared_services: str | None = None,
+        shared_dependencies: str | None = None,
         *,
         page_size: int | None = None,
         refine_passes: int = 0,
     ) -> Path:
         return self.translate(
-            "angularjs_to_react",
+            "legacy_frontend_to_component_ui",
             src,
             dst,
-            shared_services=shared_services or "",
+            shared_dependencies=shared_dependencies or "",
             page_size=page_size,
             refine_passes=refine_passes,
         )
 
-    def translate_abap(
+    def translate_enterprise_core(
         self,
         src: Path,
         dst: Path,
-        ddic_metadata: str | None = None,
+        data_model: str | None = None,
         integration_notes: str | None = None,
         *,
         page_size: int | None = None,
         refine_passes: int = 0,
     ) -> Path:
         return self.translate(
-            "abap_to_s4",
+            "enterprise_core_to_cloud",
             src,
             dst,
-            ddic_metadata=ddic_metadata or "",
+            data_model=data_model or "",
             integration_notes=integration_notes or "",
             page_size=page_size,
             refine_passes=refine_passes,

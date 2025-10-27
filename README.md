@@ -23,7 +23,7 @@ extra model calls.
 ### CLI
 
 ```bash
-python christophe.py your_project.zip --target-framework "Spring Boot" \
+python christophe.py your_project.zip --target-framework "modern service stack" \
   --page-size 5 --refine-passes 1
 ```
 
@@ -37,11 +37,3 @@ translation.
 The Flask interface now exposes *Pagination size* and *Refinement passes*
 inputs next to the file uploader, so you can experiment with progressive
 refinements directly from the browser.
-
-## Automatic strategy selection
-
-`christophe.py` now inspects both the detected source stack and individual file
-extensions to fan out to the correct migration strategy. COBOL artefacts are
-still mapped to Java, but Python/Django modules, AngularJS components and ABAP
-programs automatically invoke the dedicated translation pipelines without extra
-flags.
