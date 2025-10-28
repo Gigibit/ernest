@@ -154,7 +154,41 @@ Two additional endpoints expose the migration catalogue:
 All migration runs now track prompt and completion tokens per LLM profile.
 The CLI, web UI, and REST API include a breakdown under `token_usage` plus an
 `H100 cost estimate` section that approximates GPU time and cost assuming an
-NVIDIA H100-class instance.
+NVIDIA H100-class instance.  The receipt also factors in the running
+infrastructure bill (defaulting to **$10.58** for the primary resource) and
+applies a configurable markup (45 % by default) so you can quote profitable
+migration prices.  The summary now exposes:
+
+* `token_generation_cost` – projected GPU spend derived from prompt/completion
+  tokens and the configured hourly rate.
+* `resource_cost` – the baseline infrastructure spend you specify (defaults to
+  $10.58).
+* `subtotal_cost` – the sum of resource cost and GPU spend before markup.
+* `markup_rate` / `markup_percentage` – the gain applied to the subtotal.
+* `suggested_price` – recommended billable amount after markup.
+* `projected_profit` – the expected profit given the configured margin.
+
+Two environment variables let you tailor the defaults without touching the
+codebase:
+
+```bash
+# Override the default $10.58 infrastructure spend.
+export CHRISTOPHE_RESOURCE_COST=14.25
+
+# Provide a custom markup as a decimal or percentage string.
+export CHRISTOPHE_COST_MARKUP=0.6     # 60 %
+# …or…
+export CHRISTOPHE_COST_MARKUP=60%
+
+# Optional contextual hints shown in the receipt.
+export CHRISTOPHE_RESOURCE_TIME_LEFT="5h 43m left at current spend rate"
+export CHRISTOPHE_RESOURCE_CONTEXT="Includes tokens generation fee"
+```
+
+If `CHRISTOPHE_COST_MARKUP` is not set the application falls back to
+`CHRISTOPHE_MARKUP_RATE`; both default to a 45 % gain.  Clearing
+`CHRISTOPHE_RESOURCE_COST` or setting it to `0` removes the baseline spend from
+future receipts.
 
 ## Suggested machine capabilities
 

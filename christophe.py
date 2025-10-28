@@ -20,7 +20,12 @@ from analysis.dependency_agent import DependencyAnalysisAgent
 from analysis.heuristic_agent import HeuristicAnalysisAgent
 from analysis.semantic_graph import SemanticGraphBuilder
 from core.cache_manager import CacheManager
-from core.cost_model import estimate_h100_receipt
+from core.cost_model import (
+    DEFAULT_MARKUP_RATE,
+    DEFAULT_RESOURCE_CONTEXT,
+    DEFAULT_RESOURCE_COST,
+    estimate_h100_receipt,
+)
 from core.file_utils import secure_unzip
 from core.llm_service import LLMService
 from core.user_store import UserStore
@@ -75,6 +80,96 @@ def _resolved_profiles() -> Dict[str, Dict[str, Any]]:
                     cfg["temp"],
                 )
     return resolved
+
+
+def _coerce_float(value: Optional[str], default: float, env_name: str) -> float:
+    if value is None:
+        return default
+    stripped = value.strip()
+    if not stripped:
+        return default
+    try:
+        return float(stripped)
+    except ValueError:
+        logging.warning(
+            "Unable to parse %s=%s as float; using default %.2f",
+            env_name,
+            value,
+            default,
+        )
+        return default
+
+
+def _coerce_markup(value: Optional[str], default: float) -> float:
+    if value is None:
+        return default
+    stripped = value.strip()
+    if not stripped:
+        return default
+
+    percent_hint = stripped.endswith("%")
+    numeric_portion = stripped[:-1].strip() if percent_hint else stripped
+    try:
+        rate = float(numeric_portion)
+    except ValueError:
+        logging.warning(
+            "Unable to parse markup value %s; using default %.2f",
+            value,
+            default,
+        )
+        return default
+
+    if percent_hint:
+        rate /= 100.0
+
+    if rate < 0:
+        logging.warning(
+            "Markup %.3f is negative; clamping to default %.2f",
+            rate,
+            default,
+        )
+        return default
+
+    if rate > 1.0:
+        logging.warning(
+            "Markup %.3f interpreted as a multiplier (%.1f%%). Append '%%' to use percentage semantics.",
+            rate,
+            rate * 100.0,
+        )
+
+    return rate
+
+
+def _cost_configuration() -> Dict[str, Any]:
+    resource_cost = _coerce_float(
+        os.environ.get("CHRISTOPHE_RESOURCE_COST"),
+        DEFAULT_RESOURCE_COST,
+        "CHRISTOPHE_RESOURCE_COST",
+    )
+
+    markup_source = os.environ.get("CHRISTOPHE_COST_MARKUP") or os.environ.get(
+        "CHRISTOPHE_MARKUP_RATE"
+    )
+    markup_rate = _coerce_markup(markup_source, DEFAULT_MARKUP_RATE)
+
+    raw_time = os.environ.get("CHRISTOPHE_RESOURCE_TIME_LEFT")
+    if raw_time is None:
+        time_remaining = DEFAULT_RESOURCE_CONTEXT
+    else:
+        stripped_time = raw_time.strip()
+        time_remaining = stripped_time or DEFAULT_RESOURCE_CONTEXT
+
+    raw_note = os.environ.get("CHRISTOPHE_RESOURCE_CONTEXT") or os.environ.get(
+        "CHRISTOPHE_RESOURCE_NOTE"
+    )
+    note = raw_note.strip() if raw_note and raw_note.strip() else None
+
+    return {
+        "resource_cost": resource_cost,
+        "markup_rate": markup_rate,
+        "resource_time_left": time_remaining,
+        "resource_note": note,
+    }
 
 
 def print_section(title: str, content: str) -> None:
@@ -241,7 +336,18 @@ def run_migration(
         if hasattr(llm_service, "get_usage_summary")
         else {}
     )
-    cost_estimate = estimate_h100_receipt(token_usage) if token_usage else {}
+    cost_config = _cost_configuration()
+    cost_estimate = (
+        estimate_h100_receipt(
+            token_usage,
+            resource_cost=cost_config["resource_cost"],
+            markup_rate=cost_config["markup_rate"],
+            resource_time_remaining=cost_config["resource_time_left"],
+            resource_notes=cost_config["resource_note"],
+        )
+        if token_usage
+        else {}
+    )
 
     if token_usage:
         logging.info("Token usage summary: %s", token_usage)
