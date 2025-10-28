@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
-import re
+import subprocess
+import sys
 import textwrap
-import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict, List, Mapping, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
 
 from core.cache_manager import CacheManager
 from core.file_utils import read_head
@@ -92,54 +92,22 @@ class DependencyAnalysisAgent:
             if not snippet.strip():
                 continue
 
-            prompt = textwrap.dedent(
-                f"""
-                You are analysing dependency manifests for a legacy project being migrated.
-                Summarise the dependencies declared in the file below.
-                Respond ONLY with JSON using this schema:
-                {{
-                  "manifest": "relative/path",
-                  "items": [
-                    {{
-                      "name": "package name",
-                      "version": "declared version or null",
-                      "scope": "runtime | development | plugin | optional | unknown",
-                      "notes": "short description"
-                    }}
-                  ]
-                }}
-                Keep names as they appear, do not invent packages, and keep the list compact.
-                --- FILE ({manifest}) ---
-                {snippet}
-                """
-            )
-            cache_key = self.llm.prompt_hash("dependency", prompt)
-            cached = self.cache.get(cache_key)
-            if cached is not None:
-                record = cached
-            else:
-                response = self.llm.invoke("dependency", prompt, max_new_tokens=700)
-                record = self._extract_json(response)
-                self.cache.set(cache_key, record)
-
+            record = self._request_manifest_summary(manifest, snippet)
             if not isinstance(record, Mapping):
                 continue
+
             manifest_name = str(record.get("manifest") or manifest)
-            items = list(record.get("items") or [])
-            fallback_items = self._fallback_dependencies(manifest_path)
-            if fallback_items:
-                existing_names = {
-                    (item.get("name") or "").lower()
-                    for item in items
-                    if isinstance(item, Mapping)
-                }
-                for fallback in fallback_items:
-                    name = fallback.get("name")
-                    if not name:
-                        continue
-                    if name.lower() in existing_names:
-                        continue
-                    items.append(fallback)
+            raw_items = record.get("items")
+            items: List[Mapping[str, object]] = []
+            if isinstance(raw_items, list):
+                for entry in raw_items:
+                    if isinstance(entry, Mapping):
+                        items.append(entry)
+
+            if not items:
+                extractor_items = self._invoke_python_extractor(manifest, snippet)
+                if extractor_items:
+                    items.extend(extractor_items)
             aggregated["manifests"].append(
                 {
                     "file": manifest_name,
@@ -178,199 +146,139 @@ class DependencyAnalysisAgent:
                 return listing, True
         return listing, False
 
-    def _fallback_dependencies(self, manifest_path: Path) -> List[Dict[str, object]]:
-        """Best-effort manifest parsing when LLM output is empty or incomplete."""
-
-        name = manifest_path.name.lower()
-        try:
-            raw_text = manifest_path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            return []
-
-        if not raw_text.strip():
-            return []
-
-        if "require" in name or name.endswith(".txt"):
-            return self._parse_requirements_like(raw_text)
-        if name == "pyproject.toml":
-            return self._parse_pyproject(raw_text)
-        if name.endswith("package.json"):
-            return self._parse_package_json(raw_text)
-        if name == "pom.xml":
-            return self._parse_maven_pom(raw_text)
-        if name in {"build.gradle", "build.gradle.kts"}:
-            return self._parse_gradle(raw_text)
-        return []
-
-    @staticmethod
-    def _parse_requirements_like(text: str) -> List[Dict[str, object]]:
-        items: List[Dict[str, object]] = []
-        for line in text.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            if stripped.startswith("-"):
-                # Skip pip directives such as -r other.txt
-                continue
-            version = None
-            package = stripped
-            for marker in ("==", "~=", ">=", "<=", ">", "<", "!="):
-                if marker in stripped:
-                    pkg, version_part = stripped.split(marker, 1)
-                    package = pkg.strip()
-                    version = f"{marker}{version_part.strip()}" if version_part.strip() else marker
-                    break
-            if not package:
-                continue
-            items.append(
-                {
-                    "name": package,
-                    "version": version,
-                    "scope": "runtime",
-                    "notes": "parsed from requirements file",
-                }
-            )
-        return items
-
-    @staticmethod
-    def _parse_pyproject(text: str) -> List[Dict[str, object]]:
-        items: List[Dict[str, object]] = []
-        try:
-            import tomllib  # type: ignore
-        except Exception:  # pragma: no cover - tomllib missing
-            return items
-
-        try:
-            data = tomllib.loads(text)
-        except Exception:
-            return items
-
-        def _append_from(section: str, scope: str) -> None:
-            deps = data
-            for part in section.split(":"):
-                if isinstance(deps, dict):
-                    deps = deps.get(part)
-                else:
-                    deps = None
-                if deps is None:
-                    break
-            if isinstance(deps, dict):
-                for pkg, ver in deps.items():
-                    items.append(
-                        {
-                            "name": str(pkg),
-                            "version": str(ver),
-                            "scope": scope,
-                            "notes": "parsed from pyproject.toml",
-                        }
-                    )
-            elif isinstance(deps, list):
-                for entry in deps:
-                    if isinstance(entry, str):
-                        parts = entry.split()
-                        pkg = parts[0]
-                        ver = " ".join(parts[1:]) if len(parts) > 1 else None
-                        items.append(
-                            {
-                                "name": pkg,
-                                "version": ver,
-                                "scope": scope,
-                                "notes": "parsed from pyproject.toml",
-                            }
-                        )
-
-        _append_from("project:dependencies", "runtime")
-        _append_from("project:optional-dependencies", "optional")
-        _append_from("tool:poetry:dependencies", "runtime")
-        _append_from("tool:poetry:dev-dependencies", "development")
-        return items
-
-    @staticmethod
-    def _parse_package_json(text: str) -> List[Dict[str, object]]:
-        items: List[Dict[str, object]] = []
-        try:
-            payload = json.loads(text)
-        except json.JSONDecodeError:
-            return items
-
-        for section, scope in (
-            ("dependencies", "runtime"),
-            ("devDependencies", "development"),
-            ("peerDependencies", "optional"),
-        ):
-            deps = payload.get(section)
-            if isinstance(deps, dict):
-                for pkg, ver in deps.items():
-                    items.append(
-                        {
-                            "name": str(pkg),
-                            "version": str(ver),
-                            "scope": scope,
-                            "notes": "parsed from package.json",
-                        }
-                    )
-        return items
-
-    @staticmethod
-    def _parse_maven_pom(text: str) -> List[Dict[str, object]]:
-        items: List[Dict[str, object]] = []
-        try:
-            root = ET.fromstring(text)
-        except ET.ParseError:
-            return items
-
-        def strip_ns(tag: str) -> str:
-            return tag.split('}', 1)[1] if '}' in tag else tag
-
-        for dependency in root.findall('.//{*}dependency'):
-            record: Dict[str, object] = {}
-            for child in dependency:
-                tag = strip_ns(child.tag).lower()
-                record[tag] = (child.text or '').strip()
-            group = record.get('groupid') or ''
-            artifact = record.get('artifactid') or ''
-            version = record.get('version') or None
-            scope = record.get('scope') or None
-            if not (group or artifact):
-                continue
-            name = f"{group}:{artifact}" if group and artifact else artifact or group
-            items.append(
-                {
-                    "name": name,
-                    "version": version,
-                    "scope": scope or 'runtime',
-                    "notes": "parsed from pom.xml",
-                }
-            )
-        return items
-
-    @staticmethod
-    def _parse_gradle(text: str) -> List[Dict[str, object]]:
-        pattern = re.compile(
-            r"^(?P<configuration>api|implementation|compileOnly|runtimeOnly|testImplementation|testCompile|kapt)\s*\(?(?:['\"])(?P<coordinate>[^'\"\)]+)['\"]\)?",
-            re.MULTILINE,
+    def _request_manifest_summary(self, manifest: str, snippet: str) -> Optional[Mapping[str, object]]:
+        prompt = textwrap.dedent(
+            f"""
+            You are analysing dependency manifests for a legacy project being migrated.
+            Summarise the dependencies declared in the file below.
+            Respond ONLY with JSON using this schema:
+            {{
+              "manifest": "relative/path",
+              "items": [
+                {{
+                  "name": "package name",
+                  "version": "declared version or null",
+                  "scope": "runtime | development | plugin | optional | unknown",
+                  "notes": "short description"
+                }}
+              ]
+            }}
+            If no dependencies are present, respond with an empty list for "items" but still return valid JSON.
+            Never add commentary or Markdown.
+            --- FILE ({manifest}) ---
+            {snippet}
+            """
         )
-        items: List[Dict[str, object]] = []
-        for match in pattern.finditer(text):
-            coordinate = match.group('coordinate')
-            configuration = match.group('configuration')
-            parts = coordinate.split(':')
-            if len(parts) >= 2:
-                group, artifact, *rest = parts
-                name = f"{group}:{artifact}" if group and artifact else coordinate
-                version = rest[0] if rest else None
-            else:
-                name = coordinate
-                version = None
-            items.append(
-                {
-                    "name": name,
-                    "version": version,
-                    "scope": configuration,
-                    "notes": "parsed from Gradle build file",
-                }
+
+        cache_key = self.llm.prompt_hash("dependency", prompt)
+        cached = self.cache.get(cache_key)
+        if isinstance(cached, Mapping):
+            return cached
+
+        attempts = 0
+        follow_up = prompt
+        record: Optional[Mapping[str, object]] = None
+        while attempts < 3 and not record:
+            response = self.llm.invoke("dependency", follow_up, max_new_tokens=700)
+            candidate = self._extract_json(response)
+            if isinstance(candidate, Mapping) and "items" in candidate:
+                record = candidate
+                break
+            attempts += 1
+            follow_up = textwrap.dedent(
+                f"""
+                The previous response was not valid JSON.
+                Reply again for manifest {manifest} using ONLY valid JSON with the requested schema.
+                --- FILE ({manifest}) ---
+                {snippet}
+                """
             )
-        return items
+
+        if record:
+            self.cache.set(cache_key, record)
+        else:
+            logging.error("Dependency manifest summary failed for %s", manifest)
+        return record
+
+    def _invoke_python_extractor(self, manifest: str, snippet: str) -> List[Mapping[str, object]]:
+        plan = self._request_python_extractor(manifest, snippet)
+        if not plan:
+            return []
+
+        script = plan.get("python")
+        if not isinstance(script, str) or not script.strip():
+            return []
+
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-c", script],
+                input=snippet,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=30,
+            )
+        except Exception:  # pragma: no cover - defensive
+            logging.exception("Python extractor execution failed for %s", manifest)
+            return []
+
+        if completed.returncode != 0:
+            logging.error(
+                "Python extractor returned non-zero exit status for %s: %s",
+                manifest,
+                completed.stderr.strip(),
+            )
+            return []
+
+        stdout = completed.stdout.strip()
+        if not stdout:
+            return []
+
+        try:
+            parsed = json.loads(stdout)
+        except json.JSONDecodeError:
+            logging.error("Python extractor emitted invalid JSON for %s", manifest)
+            return []
+
+        extracted: List[Mapping[str, object]] = []
+        if isinstance(parsed, list):
+            for entry in parsed:
+                if isinstance(entry, Mapping) and entry.get("name"):
+                    extracted.append(entry)
+        return extracted
+
+    def _request_python_extractor(self, manifest: str, snippet: str) -> Optional[Mapping[str, object]]:
+        prompt = textwrap.dedent(
+            f"""
+            You design lightweight Python 3 scripts that parse arbitrary dependency manifests.
+            Provide ONLY JSON with this schema:
+            {{
+              "python": "script"
+            }}
+            The script must read the manifest content from STDIN and print a JSON array to STDOUT.
+            Each JSON element must include keys: name, version (or null), scope (or null), and notes.
+            Use only Python's standard library. Do not read or write files; rely solely on STDIN and STDOUT.
+            Keep the script concise and deterministic.
+            Manifest name: {manifest}
+            --- MANIFEST CONTENT START ---
+            {snippet}
+            --- MANIFEST CONTENT END ---
+            """
+        )
+
+        cache_key = self.llm.prompt_hash("dependency_extractor", prompt)
+        cached = self.cache.get(cache_key)
+        if isinstance(cached, Mapping):
+            return cached
+
+        response = self.llm.invoke("dependency", prompt, max_new_tokens=800)
+        plan = self._extract_json(response)
+        if isinstance(plan, Mapping) and plan.get("python"):
+            self.cache.set(cache_key, plan)
+            return plan
+
+        logging.error("Failed to obtain Python extractor for %s", manifest)
+        return None
 
     @staticmethod
     def _extract_json(text: str) -> Mapping[str, object]:
