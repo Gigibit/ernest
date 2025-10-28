@@ -61,6 +61,7 @@ def run_migration(
     cache: Optional[CacheManager] = None,
     page_size: Optional[int] = None,
     refine_passes: int = 0,
+    safe_mode: bool = True,
 ) -> Dict[str, Any]:
     """Execute the full migration pipeline for ``zip_path``.
 
@@ -138,6 +139,7 @@ def run_migration(
                 destination,
                 page_size=page_size,
                 refine_passes=refine_passes,
+                safe_mode=safe_mode,
             )
 
         for res in classification.get("resource", []):
@@ -169,6 +171,7 @@ def run_migration(
         "dependency_resolution": dependency_resolution,
         "token_usage": token_usage,
         "cost_estimate": cost_estimate,
+        "safe_mode": safe_mode,
     }
 
 
@@ -214,6 +217,10 @@ def create_app(
             .result pre { background: rgba(15, 23, 42, 0.85); color: #e2e8f0; padding: 16px; border-radius: 10px; overflow-x: auto; }
             ul { padding-left: 20px; }
             footer { margin-top: 48px; text-align: center; color: #64748b; font-size: 14px; }
+            .toggle { grid-column: 1 / -1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 18px; }
+            .checkbox-label { display: flex; align-items: center; gap: 12px; font-weight: 600; color: #1e293b; }
+            .checkbox-label input { width: 20px; height: 20px; }
+            .hint { margin-top: 8px; font-size: 13px; color: #475569; }
         </style>
     </head>
     <body>
@@ -244,6 +251,13 @@ def create_app(
                     <label for="refine_passes">Refinement passes per page</label>
                     <input id="refine_passes" name="refine_passes" type="number" min="0" step="1" value="{{ defaults.refine_passes }}" placeholder="e.g. 1">
                 </div>
+                <div class="toggle">
+                    <label class="checkbox-label" for="safe_mode">
+                        <input id="safe_mode" name="safe_mode" type="checkbox" value="1" {% if defaults.safe_mode %}checked{% endif %}>
+                        Safe mode (fallback guardrails)
+                    </label>
+                    <div class="hint">Riesegue automaticamente i chunk sospetti con prompt severi per ridurre conflitti e codice incompleto.</div>
+                </div>
                 <div class="drop-zone" id="drop-zone">
                     <p id="drop-zone-text">Drag &amp; drop your source ZIP or click to browse</p>
                     <input id="source_zip" name="source_zip" type="file" accept=".zip" hidden required>
@@ -268,6 +282,7 @@ def create_app(
                 <p><strong>Output directory:</strong> {{ result.output_path }}</p>
                 <p><strong>Detected stack:</strong></p>
                 <pre>{{ result.detected_stack | tojson(indent=2) }}</pre>
+                <p><strong>Safe mode:</strong> {{ 'enabled' if result.safe_mode else 'disabled' }}</p>
                 <p><strong>Migration plan:</strong></p>
                 <ul>
                 {% for step in result.plan %}
@@ -352,6 +367,9 @@ def create_app(
         errors: list[str] = []
         result_payload: Optional[Dict[str, Any]] = None
 
+        safe_mode_flag = request.form.get("safe_mode")
+        safe_mode_enabled = True if request.method != "POST" else bool(safe_mode_flag)
+
         defaults = {
             "target_framework": request.form.get("target_framework", ""),
             "target_lang": request.form.get("target_lang", "java"),
@@ -359,6 +377,7 @@ def create_app(
             "src_framework": request.form.get("src_framework", ""),
             "page_size": request.form.get("page_size", ""),
             "refine_passes": request.form.get("refine_passes", "0"),
+            "safe_mode": safe_mode_enabled,
         }
 
         if request.method == "POST":
@@ -416,7 +435,9 @@ def create_app(
                         cache=cache_manager,
                         page_size=page_size_int,
                         refine_passes=refine_passes_int,
+                        safe_mode=safe_mode_enabled,
                     )
+                    safe_mode_result = migration.get("safe_mode", safe_mode_enabled)
                     result_payload = {
                         "project_name": migration["project_name"],
                         "output_path": str(migration["target_path"]),
@@ -427,6 +448,7 @@ def create_app(
                         "dependency_resolution": migration.get("dependency_resolution", {}),
                         "token_usage": migration.get("token_usage", {}),
                         "cost_estimate": migration.get("cost_estimate", {}),
+                        "safe_mode": safe_mode_result,
                     }
                 except Exception as exc:  # noqa: BLE001 - bubble error to UI and log stack
                     app.logger.exception("Migration failed")
@@ -469,6 +491,14 @@ def create_app(
             request.form.get("src_framework")
             or request.values.get("src_framework")
         )
+        safe_mode_value = (
+            request.form.get("safe_mode")
+            or request.values.get("safe_mode")
+            or request.args.get("safe_mode")
+        )
+        safe_mode_enabled = True
+        if safe_mode_value is not None:
+            safe_mode_enabled = str(safe_mode_value).lower() not in {"0", "false", "off", "no"}
 
         if uploaded is None or uploaded.filename == "":
             return ({"error": "A ZIP archive must be provided."}, 400)
@@ -494,6 +524,7 @@ def create_app(
                 output_root=web_output_root,
                 llm=llm_service,
                 cache=cache_manager,
+                safe_mode=safe_mode_enabled,
             )
         except Exception as exc:  # noqa: BLE001
             app.logger.exception("API migration failed")
@@ -512,6 +543,7 @@ def create_app(
             "dependency_resolution": migration.get("dependency_resolution", {}),
             "token_usage": migration.get("token_usage", {}),
             "cost_estimate": migration.get("cost_estimate", {}),
+            "safe_mode": migration.get("safe_mode", safe_mode_enabled),
         }
         return response, 200
 
@@ -543,6 +575,12 @@ def main() -> None:
         type=int,
         default=0,
         help="How many refinement passes to run for each translated page.",
+    )
+    parser.add_argument(
+        "--safe-mode",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable fallback guardrails to reissue risky chunks with stricter prompts (enabled by default).",
     )
 
     args = parser.parse_args()
@@ -583,6 +621,7 @@ def main() -> None:
             cache=cache,
             page_size=page_size,
             refine_passes=args.refine_passes,
+            safe_mode=args.safe_mode,
         )
     finally:
         cache.close()
@@ -590,6 +629,8 @@ def main() -> None:
     print_section("Classificazione File", json.dumps(result["classification"], indent=2))
     print_section("Stack Rilevato", json.dumps(result["detected_stack"], indent=2))
     print_section("Piano di Migrazione", "\n".join(result["plan"]))
+    safe_mode_message = "Abilitato" if result.get("safe_mode", True) else "Disabilitato"
+    print_section("Safe Mode", safe_mode_message)
     print_section("Progetto Migrato", f"Output generato in: {result['target_path']}")
     dependencies = result.get("dependencies")
     if dependencies and (

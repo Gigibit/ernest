@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import re
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Dict, Iterable, Mapping, MutableMapping, Sequence
 
@@ -44,6 +45,7 @@ class SourceMigrator:
         *,
         page_size: int | None = None,
         refine_passes: int = 0,
+        safe_mode: bool = True,
         **context,
     ) -> Path:
         """Run the translation pipeline using ``strategy_key``.
@@ -96,6 +98,7 @@ class SourceMigrator:
                     end,
                     context,
                     llm_overrides,
+                    safe_mode,
                 )
 
                 if refine_passes > 0:
@@ -133,6 +136,7 @@ class SourceMigrator:
         *,
         page_size: int | None = None,
         refine_passes: int = 0,
+        safe_mode: bool = True,
     ) -> Path:
         return self.translate(
             "legacy_backend_to_services",
@@ -142,6 +146,7 @@ class SourceMigrator:
             integration_contracts=integration_contracts,
             page_size=page_size,
             refine_passes=refine_passes,
+            safe_mode=safe_mode,
         )
 
     def translate_dynamic_web_module(
@@ -152,6 +157,7 @@ class SourceMigrator:
         *,
         page_size: int | None = None,
         refine_passes: int = 0,
+        safe_mode: bool = True,
     ) -> Path:
         return self.translate(
             "dynamic_web_to_structured_backend",
@@ -160,6 +166,7 @@ class SourceMigrator:
             runtime_configuration=runtime_configuration or "",
             page_size=page_size,
             refine_passes=refine_passes,
+            safe_mode=safe_mode,
         )
 
     def translate_client_component(
@@ -170,6 +177,7 @@ class SourceMigrator:
         *,
         page_size: int | None = None,
         refine_passes: int = 0,
+        safe_mode: bool = True,
     ) -> Path:
         return self.translate(
             "legacy_frontend_to_component_ui",
@@ -178,6 +186,7 @@ class SourceMigrator:
             shared_dependencies=shared_dependencies or "",
             page_size=page_size,
             refine_passes=refine_passes,
+            safe_mode=safe_mode,
         )
 
     def translate_enterprise_core(
@@ -189,6 +198,7 @@ class SourceMigrator:
         *,
         page_size: int | None = None,
         refine_passes: int = 0,
+        safe_mode: bool = True,
     ) -> Path:
         return self.translate(
             "enterprise_core_to_cloud",
@@ -198,6 +208,7 @@ class SourceMigrator:
             integration_notes=integration_notes or "",
             page_size=page_size,
             refine_passes=refine_passes,
+            safe_mode=safe_mode,
         )
 
     # Internal helpers -----------------------------------------------------
@@ -221,21 +232,36 @@ class SourceMigrator:
         end: int,
         context: Mapping[str, str],
         llm_overrides: MutableMapping[str, object],
+        safe_mode: bool,
     ) -> list[str]:
         translated_parts: list[str] = []
         for idx in range(start, end):
             chunk = chunks[idx]
-            prompt = strategy.build_prompt(chunk, idx, context)
-            cache_key = self.llm.prompt_hash(strategy.profile, prompt)
-            cached = self.cache.get(cache_key)
-            if cached is not None:
-                translated_parts.append(self._clean_generation(cached))
-                continue
+            translated = self._issue_prompt(
+                strategy,
+                chunk,
+                idx,
+                context,
+                llm_overrides,
+                fallback=False,
+            )
 
-            response = self.llm.invoke(strategy.profile, prompt, **llm_overrides)
-            cleaned = self._clean_generation(response)
-            self.cache.set(cache_key, cleaned)
-            translated_parts.append(cleaned)
+            if safe_mode and self._should_retry(chunk, translated, strategy):
+                logging.warning(
+                    "Fallback translation triggered for chunk %s using strategy %s",
+                    idx,
+                    strategy.name,
+                )
+                translated = self._issue_prompt(
+                    strategy,
+                    chunk,
+                    idx,
+                    context,
+                    llm_overrides,
+                    fallback=True,
+                )
+
+            translated_parts.append(translated)
 
         return translated_parts
 
@@ -272,6 +298,87 @@ class SourceMigrator:
             current = cleaned
 
         return current
+
+    def _issue_prompt(
+        self,
+        strategy: TranslationStrategy,
+        chunk: str,
+        chunk_index: int,
+        context: Mapping[str, str],
+        llm_overrides: MutableMapping[str, object],
+        *,
+        fallback: bool,
+    ) -> str:
+        prompt = strategy.build_prompt(chunk, chunk_index, context, fallback=fallback)
+        profile = (
+            strategy.fallback_profile
+            if fallback and strategy.fallback_profile
+            else strategy.profile
+        )
+        overrides = dict(llm_overrides)
+        if fallback and strategy.fallback_max_new_tokens:
+            overrides["max_new_tokens"] = strategy.fallback_max_new_tokens
+
+        cache_key = self.llm.prompt_hash(profile, prompt)
+        cached = self.cache.get(cache_key)
+        if cached is not None:
+            return self._clean_generation(cached)
+
+        response = self.llm.invoke(profile, prompt, **overrides)
+        cleaned = self._clean_generation(response)
+        self.cache.set(cache_key, cleaned)
+        return cleaned
+
+    def _should_retry(
+        self,
+        chunk: str,
+        translated: str,
+        strategy: TranslationStrategy,
+    ) -> bool:
+        """Detects obviously unsafe translations that warrant a fallback prompt."""
+
+        if not translated.strip():
+            return True
+
+        if self._has_disallowed_markers(translated):
+            return True
+
+        if self._looks_like_passthrough(chunk, translated):
+            return True
+
+        lowered = translated.lower()
+        for trigger in strategy.fallback_triggers:
+            if trigger and trigger.lower() in lowered:
+                return True
+
+        return False
+
+    @staticmethod
+    def _has_disallowed_markers(text: str) -> bool:
+        patterns = (
+            "<<<<<<<",
+            ">>>>>>>",
+            "====",
+            "TODO",
+            "FIXME",
+            "TBD",
+            "NOT IMPLEMENTED",
+            "???",
+        )
+        upper_text = text.upper()
+        return any(marker in upper_text for marker in patterns)
+
+    @staticmethod
+    def _looks_like_passthrough(original: str, translated: str) -> bool:
+        original_norm = re.sub(r"\s+", " ", original.strip().lower())
+        translated_norm = re.sub(r"\s+", " ", translated.strip().lower())
+        if not original_norm or not translated_norm:
+            return False
+        if len(translated_norm) < 40:
+            return False
+
+        ratio = SequenceMatcher(None, original_norm, translated_norm).ratio()
+        return ratio >= 0.85
 
     @staticmethod
     def _clean_generation(text: str) -> str:

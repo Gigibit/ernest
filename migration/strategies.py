@@ -14,7 +14,7 @@ libraries) without changing the orchestration code in :mod:`source_migrator`.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Mapping
+from typing import Dict, Mapping, Sequence
 
 
 @dataclass(frozen=True)
@@ -69,8 +69,19 @@ class TranslationStrategy:
     refine_instructions: str | None = None
     refine_profile: str | None = None
     refine_max_new_tokens: int | None = None
+    fallback_instructions: str | None = None
+    fallback_profile: str | None = None
+    fallback_max_new_tokens: int | None = None
+    fallback_triggers: Sequence[str] = field(default_factory=tuple)
 
-    def build_prompt(self, chunk: str, chunk_index: int, context: Mapping[str, str]) -> str:
+    def build_prompt(
+        self,
+        chunk: str,
+        chunk_index: int,
+        context: Mapping[str, str],
+        *,
+        fallback: bool = False,
+    ) -> str:
         """Compose the prompt for a single chunk."""
 
         guidance = (
@@ -79,6 +90,9 @@ class TranslationStrategy:
             f"Rebuild it so it fits {self.target_descriptor}."
         )
         directives = self.instructions.strip()
+        if fallback and self.fallback_instructions:
+            appendix = self.fallback_instructions.strip()
+            directives = f"{directives}\n{appendix}" if directives else appendix
         if directives:
             guidance = f"{guidance}\n{directives}"
 
@@ -155,6 +169,20 @@ DEFAULT_STRATEGIES: Dict[str, TranslationStrategy] = {
         ),
         refine_profile="translate",
         refine_max_new_tokens=3072,
+        fallback_instructions=(
+            "Se il risultato include ancora sintassi o parole chiave del sistema originale, "
+            "riscrivi completamente il blocco nel linguaggio di destinazione. Elimina "
+            "qualsiasi marcatore di conflitto e fornisci solo codice pronto alla compilazione."
+        ),
+        fallback_max_new_tokens=4096,
+        fallback_triggers=(
+            "IDENTIFICATION DIVISION",
+            "PROGRAM-ID",
+            "ENVIRONMENT DIVISION",
+            "PERFORM ",
+            "EXEC CICS",
+            "MOVE ",
+        ),
     ),
     "dynamic_web_to_structured_backend": TranslationStrategy(
         name="dynamic_web_to_structured_backend",
@@ -177,6 +205,18 @@ DEFAULT_STRATEGIES: Dict[str, TranslationStrategy] = {
         ),
         refine_profile="translate",
         refine_max_new_tokens=3072,
+        fallback_instructions=(
+            "Assicurati che ogni handler, vista o modello dinamico venga convertito in "
+            "controller tipizzati, DTO e servizi contemporanei. Non lasciare frammenti del "
+            "framework sorgente e non restituire commenti descrittivi."
+        ),
+        fallback_max_new_tokens=3072,
+        fallback_triggers=(
+            "ng-controller",
+            "django",
+            "flask",
+            "request.POST",
+        ),
     ),
     "legacy_frontend_to_component_ui": TranslationStrategy(
         name="legacy_frontend_to_component_ui",
@@ -199,6 +239,18 @@ DEFAULT_STRATEGIES: Dict[str, TranslationStrategy] = {
         ),
         refine_profile="translate",
         refine_max_new_tokens=2048,
+        fallback_instructions=(
+            "Converte qualsiasi direttiva o template legacy in componenti dichiarativi "
+            "con gestione dello stato esplicita. Non includere testo descrittivo, "
+            "markup duplicato o commenti discorsivi."
+        ),
+        fallback_max_new_tokens=2048,
+        fallback_triggers=(
+            "ng-repeat",
+            "data-bind",
+            "$scope",
+            "{{",
+        ),
     ),
     "enterprise_core_to_cloud": TranslationStrategy(
         name="enterprise_core_to_cloud",
@@ -222,5 +274,17 @@ DEFAULT_STRATEGIES: Dict[str, TranslationStrategy] = {
         ),
         refine_profile="translate",
         refine_max_new_tokens=2560,
+        fallback_instructions=(
+            "Se l'output conserva termini, commenti o chiamate proprietarie del sistema "
+            "legacy, riscrivi la sezione nel linguaggio target adottando pattern cloud-native. "
+            "Non lasciare placeholder o TODO."
+        ),
+        fallback_max_new_tokens=3072,
+        fallback_triggers=(
+            "CUSTOM-EXIT",
+            "BADI",
+            "EXIT ",
+            "LEGACY",
+        ),
     ),
 }

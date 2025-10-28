@@ -38,6 +38,30 @@ The Flask interface now exposes *Pagination size* and *Refinement passes*
 inputs next to the file uploader, so you can experiment with progressive
 refinements directly from the browser.
 
+## Safe mode fallback guardrails
+
+Safe mode is enabled by default and adds an automatic safety harness to the
+translation pipeline.  Each chunk is inspected for merge markers, TODOs, or
+legacy syntax: suspicious results are reissued with stricter fallback prompts
+before touching the destination project.  This significantly reduces the chance
+of ending up with conflicted files during large migrations (e.g. legacy COBOL
+modules moving to modern service frameworks) without requiring manual tuning.
+
+### CLI
+
+The command line exposes `--safe-mode/--no-safe-mode` so you can toggle the
+guardrails explicitly.  Example:
+
+```bash
+python christophe.py your_project.zip --target-framework "modern service stack" \
+  --no-safe-mode
+```
+
+### Web UI
+
+The web form includes a *Safe mode* checkbox (checked by default).  Uncheck it
+to force raw translations without fallback retries.
+
 ## REST API for automated migrations
 
 When the Flask server is running you can trigger migrations programmatically
@@ -51,6 +75,9 @@ by calling `POST /api/migrate` with a multipart form payload:
 * `src_lang` (string, optional): declare the legacy language to skip the LLM
   stack detection pass.
 * `src_framework` (string, optional): descriptor for the legacy framework.
+* `safe_mode` (boolean-like string, optional): set to `false`, `0`, `off`, or
+  `no` to disable fallback retries; any other value (or omission) keeps safe
+  mode enabled.
 
 The response returns the migration plan, the detected (or user-provided)
 stack, token usage, and an estimated hardware receipt.
