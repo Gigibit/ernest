@@ -591,15 +591,85 @@
                     return;
                 }
                 container.innerHTML = '';
-                const sorted = sortProjects(projects, mode);
-                if (!sorted || sorted.length === 0) {
+                if (!projects || projects.length === 0) {
                     emptyElement.style.display = 'block';
                     return;
                 }
                 emptyElement.style.display = 'none';
-                sorted.forEach((project) => {
-                    container.appendChild(buildRow(project, mode));
+                projects.forEach((project) => {
+                    container.appendChild(buildCard(project, mode));
                 });
+            }
+
+            function buildCard(project, mode) {
+                const card = document.createElement('div');
+                card.className = 'project-card';
+                const status = (project.status || 'unknown').toLowerCase();
+                if (mode === 'completed') {
+                    card.classList.add('completed');
+                } else if (status === 'failed') {
+                    card.classList.add('failed');
+                }
+
+                const title = document.createElement('div');
+                title.className = 'title';
+                title.textContent = project.name || project.project_name || project.id || 'Unnamed project';
+                card.appendChild(title);
+
+                const statusLine = document.createElement('div');
+                statusLine.className = 'meta';
+                const updatedValue = project.updated_at || project.completed_at || '';
+                statusLine.textContent = `Status: ${project.status || 'unknown'} • Updated: ${updatedValue}`;
+                card.appendChild(statusLine);
+
+                if (project.original_filename) {
+                    const original = document.createElement('div');
+                    original.className = 'meta';
+                    original.textContent = `Original: ${project.original_filename}`;
+                    card.appendChild(original);
+                }
+
+                if (mode === 'completed') {
+                    const finished = document.createElement('div');
+                    finished.className = 'meta';
+                    finished.textContent = `Finished: ${project.completed_at || project.updated_at || ''}`;
+                    card.appendChild(finished);
+
+                    if (project.download_name) {
+                        const output = document.createElement('div');
+                        output.className = 'meta';
+                        output.textContent = `Output: ${project.download_name}`;
+                        card.appendChild(output);
+                    }
+
+                    if (project.cost_estimate) {
+                        const cost = document.createElement('pre');
+                        cost.className = 'meta';
+                        try {
+                            cost.textContent = JSON.stringify(project.cost_estimate, null, 2);
+                        } catch (error) {
+                            cost.textContent = String(project.cost_estimate);
+                        }
+                        card.appendChild(cost);
+                    }
+
+                    if (project.download_url) {
+                        const downloadLink = document.createElement('a');
+                        downloadLink.className = 'download';
+                        downloadLink.href = project.download_url;
+                        downloadLink.textContent = 'Download archive';
+                        card.appendChild(downloadLink);
+                    }
+                }
+
+                if (project.error) {
+                    const error = document.createElement('div');
+                    error.className = 'error-text';
+                    error.textContent = project.error;
+                    card.appendChild(error);
+                }
+
+                return card;
             }
 
             function partitionProjects(projects) {
@@ -618,191 +688,6 @@
             function applyData(pending, completed) {
                 renderProjects(pending, activeContainer, activeEmpty, 'pending');
                 renderProjects(completed, completedContainer, completedEmpty, 'completed');
-            }
-
-            function sortProjects(projects, mode) {
-                const copy = Array.isArray(projects) ? projects.slice() : [];
-                copy.sort((a, b) => resolveTimestamp(b, mode) - resolveTimestamp(a, mode));
-                return copy;
-            }
-
-            function resolveTimestamp(project, mode) {
-                const candidates = [];
-                if (mode === 'completed') {
-                    candidates.push(project.completed_at);
-                }
-                candidates.push(project.updated_at, project.started_at, project.created_at, project.queued_at);
-                for (const value of candidates) {
-                    const parsed = parseDate(value);
-                    if (parsed) {
-                        return parsed.getTime();
-                    }
-                }
-                return 0;
-            }
-
-            function parseDate(value) {
-                if (!value) {
-                    return null;
-                }
-                const date = new Date(value);
-                if (Number.isNaN(date.getTime())) {
-                    return null;
-                }
-                return date;
-            }
-
-            function buildRow(project, mode) {
-                const statusCategory = getStatusCategory(project.status);
-                const row = document.createElement('div');
-                row.className = `project-row status-${statusCategory}`;
-
-                const header = document.createElement('button');
-                header.type = 'button';
-                header.className = 'project-header';
-                header.setAttribute('aria-expanded', 'false');
-
-                const summary = document.createElement('div');
-                summary.className = 'project-summary';
-                const statusDot = document.createElement('span');
-                statusDot.className = `status-dot status-${statusCategory}`;
-                statusDot.setAttribute('aria-hidden', 'true');
-                summary.appendChild(statusDot);
-                const title = document.createElement('span');
-                title.className = 'project-title';
-                title.textContent = project.name || project.project_name || project.id || 'Unnamed project';
-                summary.appendChild(title);
-                header.appendChild(summary);
-
-                const updated = document.createElement('span');
-                updated.className = 'project-updated';
-                updated.textContent = `${project.status || 'unknown'} • ${getDisplayTimestamp(project, mode)}`;
-                header.appendChild(updated);
-
-                row.appendChild(header);
-
-                const details = document.createElement('div');
-                details.className = 'project-details';
-                details.hidden = true;
-
-                appendDetailLine(details, 'Status', project.status || 'unknown');
-                if (project.updated_at) {
-                    appendDetailLine(details, 'Updated', project.updated_at);
-                }
-                if (project.started_at) {
-                    appendDetailLine(details, 'Started', project.started_at);
-                }
-                if (project.created_at) {
-                    appendDetailLine(details, 'Queued', project.created_at);
-                }
-                if (project.completed_at) {
-                    appendDetailLine(details, 'Finished', project.completed_at);
-                }
-                if (project.original_filename) {
-                    appendDetailLine(details, 'Original file', project.original_filename);
-                }
-                if (project.download_name) {
-                    appendDetailLine(details, 'Output', project.download_name);
-                }
-                if (project.cost_estimate) {
-                    details.appendChild(buildDetailHeading('Cost estimate'));
-                    details.appendChild(buildDetailBlock(project.cost_estimate));
-                }
-                if (project.error) {
-                    details.appendChild(buildDetailHeading('Last error'));
-                    details.appendChild(buildErrorBlock(project.error));
-                }
-                if (project.download_url) {
-                    details.appendChild(buildDownloadLink(project.download_url));
-                }
-
-                row.appendChild(details);
-
-                header.addEventListener('click', () => {
-                    const expanded = !row.classList.contains('expanded');
-                    row.classList.toggle('expanded', expanded);
-                    header.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-                    details.hidden = !expanded;
-                });
-
-                return row;
-            }
-
-            function getStatusCategory(status) {
-                const normalized = (status || '').toLowerCase();
-                if (normalized === 'completed') {
-                    return 'completed';
-                }
-                if (['failed', 'error', 'ko'].includes(normalized)) {
-                    return 'failed';
-                }
-                return 'pending';
-            }
-
-            function getDisplayTimestamp(project, mode) {
-                const candidates = [];
-                if (mode === 'completed') {
-                    candidates.push(project.completed_at);
-                }
-                candidates.push(project.updated_at, project.started_at, project.created_at, project.queued_at);
-                for (const value of candidates) {
-                    if (value) {
-                        return value;
-                    }
-                }
-                return '';
-            }
-
-            function appendDetailLine(container, label, value) {
-                const line = document.createElement('div');
-                line.className = 'detail-line';
-                line.innerHTML = `<strong>${escapeHtml(String(label))}:</strong> ${escapeHtml(String(value))}`;
-                container.appendChild(line);
-            }
-
-            function buildDetailBlock(data) {
-                const block = document.createElement('pre');
-                block.className = 'detail-block';
-                try {
-                    block.textContent = JSON.stringify(data, null, 2);
-                } catch (error) {
-                    block.textContent = String(data);
-                }
-                return block;
-            }
-
-            function buildErrorBlock(message) {
-                const block = document.createElement('div');
-                block.className = 'detail-block';
-                block.setAttribute('role', 'alert');
-                block.textContent = message;
-                return block;
-            }
-
-            function buildDetailHeading(label) {
-                const heading = document.createElement('div');
-                heading.className = 'detail-line';
-                heading.innerHTML = `<strong>${escapeHtml(String(label))}</strong>`;
-                return heading;
-            }
-
-            function buildDownloadLink(url) {
-                const downloadLink = document.createElement('a');
-                downloadLink.className = 'download';
-                downloadLink.textContent = 'Download archive';
-                let downloadHref = url;
-                if (token && typeof downloadHref === 'string' && downloadHref.includes('/api/')) {
-                    const separator = downloadHref.includes('?') ? '&' : '?';
-                    downloadHref = `${downloadHref}${separator}token=${encodeURIComponent(token)}`;
-                }
-                downloadLink.href = downloadHref;
-                return downloadLink;
-            }
-
-            function escapeHtml(value) {
-                const div = document.createElement('div');
-                div.textContent = value;
-                return div.innerHTML;
             }
 
             applyData(initialPending || [], initialCompleted || []);
