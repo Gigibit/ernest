@@ -1,3 +1,4 @@
+from __future__ import annotations
 # christophe.py
 """CLI and web front-end for the migration orchestrator."""
 
