@@ -467,6 +467,18 @@
                             <pre>{{ project.architecture | tojson(indent=2) }}</pre>
                         </details>
                         {% endif %}
+                        {% if project.scaffolding_blueprint %}
+                        <details class="detail-block">
+                            <summary>Scaffolding blueprint</summary>
+                            <pre>{{ project.scaffolding_blueprint | tojson(indent=2) }}</pre>
+                        </details>
+                        {% endif %}
+                        {% if project.scaffolding_stubs %}
+                        <details class="detail-block">
+                            <summary>Generated stubs</summary>
+                            <pre>{{ project.scaffolding_stubs | tojson(indent=2) }}</pre>
+                        </details>
+                        {% endif %}
                         {% if project.compatibility %}
                         <details class="detail-block">
                             <summary>Alternative suggestions</summary>
@@ -516,6 +528,18 @@
                         <details class="detail-block">
                             <summary>Architecture mapping</summary>
                             <pre>{{ result.architecture | tojson(indent=2) }}</pre>
+                        </details>
+                        {% endif %}
+                        {% if result.scaffolding_blueprint %}
+                        <details class="detail-block">
+                            <summary>Scaffolding blueprint</summary>
+                            <pre>{{ result.scaffolding_blueprint | tojson(indent=2) }}</pre>
+                        </details>
+                        {% endif %}
+                        {% if result.scaffolding_stubs %}
+                        <details class="detail-block">
+                            <summary>Generated stubs</summary>
+                            <pre>{{ result.scaffolding_stubs | tojson(indent=2) }}</pre>
                         </details>
                         {% endif %}
                         {% if result.compatibility %}
@@ -754,6 +778,14 @@
                 if (project.architecture) {
                     details.appendChild(buildDetailHeading('Architecture mapping'));
                     details.appendChild(buildDetailBlock(project.architecture));
+                }
+                if (project.scaffolding_blueprint) {
+                    details.appendChild(buildDetailHeading('Scaffolding blueprint'));
+                    details.appendChild(buildDetailBlock(project.scaffolding_blueprint));
+                }
+                if (project.scaffolding_stubs && project.scaffolding_stubs.length) {
+                    details.appendChild(buildDetailHeading('Generated stubs'));
+                    details.appendChild(buildDetailBlock(project.scaffolding_stubs));
                 }
                 if (project.compatibility) {
                     details.appendChild(buildDetailHeading('Alternative suggestions'));

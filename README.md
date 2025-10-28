@@ -87,6 +87,25 @@ alongside the architecture map so you can review web-sourced hints directly
 from the dashboard or API before adopting third-party packages in the target
 project.
 
+## Scaffolding blueprint & manual hand-off stubs
+
+`ScaffoldingBlueprintAgent` analyses representative legacy files, the generated
+architecture mapping, and known dependencies to identify modules that cannot be
+fully migrated automatically. For every detected gap it proposes a contract
+(class name, destination path, responsibilities) and the orchestrator writes
+TODO stubs inside the generated project tree. These stubs include inline
+guidance so target developers can finish the migration while preserving the
+expected behaviour. Blueprint metadata and stub creation logs surface via the
+CLI output, REST responses, and authenticated dashboard.
+
+## Deterministic dependency extraction fallbacks
+
+While the default behaviour relies on LLM prompts, `DependencyAnalysisAgent`
+now parses common manifest formats (e.g. `requirements.txt`, `pyproject.toml`,
+`package.json`) locally whenever the model omits entries. This guarantees
+critical packages such as `transformers` or `torch` appear in the dependency
+snapshot before compatibility research or blueprint planning occurs.
+
 ## Authenticated workspaces and project tracking
 
 Launching the Flask server now presents a lightweight authentication screen.
@@ -264,28 +283,6 @@ export MIGRATION_PROFILE_TRANSLATE_MAX_TOKENS=4096
 
 Remember to scale memory, GPU, and disk resources accordingly before switching
 to larger checkpoints.
-
-## Suggested machine capabilities
-
-The platform can execute entirely on CPU-only machines, but the combined
-translation, dependency analysis, and asynchronous background workers benefit
-from additional resources:
-
-* **Memory:** At least 16 GB of RAM is required to load medium-sized language
-  models reliably; 32 GB or more prevents swapping when multiple migrations run
-  concurrently.
-* **CPU:** Eight modern vCPUs keep chunking, archive extraction, and dependency
-  downloads responsive. Heavy workloads with concurrent migrations benefit from
-  16+ vCPUs.
-* **GPU (optional):** A CUDA-capable GPU with 24 GB of VRAM or more (e.g.,
-  NVIDIA H100-class hardware) shortens inference time considerably. If a GPU is
-  present but CUDA drivers/toolkit are missing, the application logs guidance on
-  installing `nvcc` or updating drivers at startup.
-* **Storage:** Reserve at least 20 GB of free disk space for temporary ZIP
-  uploads, generated output archives, cached models, and dependency downloads.
-
-When GPU acceleration is unavailable, the service falls back to CPU inference,
-which increases latency but does not block migrations.
 
 ## Dependency planning and alternative evaluation
 

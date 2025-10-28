@@ -123,7 +123,21 @@ class DependencyAnalysisAgent:
             if not isinstance(record, Mapping):
                 continue
             manifest_name = str(record.get("manifest") or manifest)
-            items = record.get("items") or []
+            items = list(record.get("items") or [])
+            fallback_items = self._fallback_dependencies(manifest_path)
+            if fallback_items:
+                existing_names = {
+                    (item.get("name") or "").lower()
+                    for item in items
+                    if isinstance(item, Mapping)
+                }
+                for fallback in fallback_items:
+                    name = fallback.get("name")
+                    if not name:
+                        continue
+                    if name.lower() in existing_names:
+                        continue
+                    items.append(fallback)
             aggregated["manifests"].append(
                 {
                     "file": manifest_name,
@@ -161,6 +175,135 @@ class DependencyAnalysisAgent:
             if len(listing) >= limit:
                 return listing, True
         return listing, False
+
+    def _fallback_dependencies(self, manifest_path: Path) -> List[Dict[str, object]]:
+        """Best-effort manifest parsing when LLM output is empty or incomplete."""
+
+        name = manifest_path.name.lower()
+        try:
+            raw_text = manifest_path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return []
+
+        if not raw_text.strip():
+            return []
+
+        if "require" in name or name.endswith(".txt"):
+            return self._parse_requirements_like(raw_text)
+        if name == "pyproject.toml":
+            return self._parse_pyproject(raw_text)
+        if name.endswith("package.json"):
+            return self._parse_package_json(raw_text)
+        return []
+
+    @staticmethod
+    def _parse_requirements_like(text: str) -> List[Dict[str, object]]:
+        items: List[Dict[str, object]] = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if stripped.startswith("-"):
+                # Skip pip directives such as -r other.txt
+                continue
+            version = None
+            package = stripped
+            for marker in ("==", "~=", ">=", "<=", ">", "<", "!="):
+                if marker in stripped:
+                    pkg, version_part = stripped.split(marker, 1)
+                    package = pkg.strip()
+                    version = f"{marker}{version_part.strip()}" if version_part.strip() else marker
+                    break
+            if not package:
+                continue
+            items.append(
+                {
+                    "name": package,
+                    "version": version,
+                    "scope": "runtime",
+                    "notes": "parsed from requirements file",
+                }
+            )
+        return items
+
+    @staticmethod
+    def _parse_pyproject(text: str) -> List[Dict[str, object]]:
+        items: List[Dict[str, object]] = []
+        try:
+            import tomllib  # type: ignore
+        except Exception:  # pragma: no cover - tomllib missing
+            return items
+
+        try:
+            data = tomllib.loads(text)
+        except Exception:
+            return items
+
+        def _append_from(section: str, scope: str) -> None:
+            deps = data
+            for part in section.split(":"):
+                if isinstance(deps, dict):
+                    deps = deps.get(part)
+                else:
+                    deps = None
+                if deps is None:
+                    break
+            if isinstance(deps, dict):
+                for pkg, ver in deps.items():
+                    items.append(
+                        {
+                            "name": str(pkg),
+                            "version": str(ver),
+                            "scope": scope,
+                            "notes": "parsed from pyproject.toml",
+                        }
+                    )
+            elif isinstance(deps, list):
+                for entry in deps:
+                    if isinstance(entry, str):
+                        parts = entry.split()
+                        pkg = parts[0]
+                        ver = " ".join(parts[1:]) if len(parts) > 1 else None
+                        items.append(
+                            {
+                                "name": pkg,
+                                "version": ver,
+                                "scope": scope,
+                                "notes": "parsed from pyproject.toml",
+                            }
+                        )
+
+        _append_from("project:dependencies", "runtime")
+        _append_from("project:optional-dependencies", "optional")
+        _append_from("tool:poetry:dependencies", "runtime")
+        _append_from("tool:poetry:dev-dependencies", "development")
+        return items
+
+    @staticmethod
+    def _parse_package_json(text: str) -> List[Dict[str, object]]:
+        items: List[Dict[str, object]] = []
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            return items
+
+        for section, scope in (
+            ("dependencies", "runtime"),
+            ("devDependencies", "development"),
+            ("peerDependencies", "optional"),
+        ):
+            deps = payload.get(section)
+            if isinstance(deps, dict):
+                for pkg, ver in deps.items():
+                    items.append(
+                        {
+                            "name": str(pkg),
+                            "version": str(ver),
+                            "scope": scope,
+                            "notes": "parsed from package.json",
+                        }
+                    )
+        return items
 
     @staticmethod
     def _extract_json(text: str) -> Mapping[str, object]:

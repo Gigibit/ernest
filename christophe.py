@@ -1,10 +1,8 @@
 from __future__ import annotations
 # christophe.py
 """CLI and web front-end for the migration orchestrator."""
-"""
-o gioia, ch'io conobbi, esser amato amando!
-"""
 
+from __future__ import annotations
 
 import json
 import logging
@@ -14,7 +12,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from analysis.compatibility_agent import CompatibilitySearchAgent
 from analysis.dependency_agent import DependencyAnalysisAgent
@@ -35,6 +33,7 @@ from migration.recovery_manager import RecoveryManager
 from migration.resource_migrator import ResourceMigrator
 from migration.source_migrator import SourceMigrator
 from planning.architecture_agent import ArchitecturePlanner
+from planning.scaffolding_blueprint_agent import ScaffoldingBlueprintAgent
 from planning.planning_agent import PlanningAgent
 from scaffolding.scaffolding_agent import ScaffoldingAgent
 
@@ -48,6 +47,7 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
     "scaffold": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 2048, "temp": 0.1},
     "dependency": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1536, "temp": 0.0},
     "compatibility": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1536, "temp": 0.0},
+    "blueprint": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1536, "temp": 0.0},
 }
 
 
@@ -176,6 +176,125 @@ def _cost_configuration() -> Dict[str, Any]:
     }
 
 
+def _stub_content(
+    *,
+    target_language: str,
+    class_name: str,
+    package: str | None,
+    reason: str,
+    expected_contract: str | None,
+    notes: str | None,
+) -> str:
+    normalized = (target_language or "").lower()
+    advisory_lines = [reason]
+    if expected_contract and expected_contract.strip():
+        advisory_lines.append(expected_contract.strip())
+    if notes and notes.strip():
+        advisory_lines.append(notes.strip())
+    advisory = "\n".join(f"// {line}" for line in advisory_lines if line)
+
+    if normalized in {"java", "kotlin", "scala"}:
+        package_line = f"package {package};\n\n" if package else ""
+        return (
+            f"{package_line}public class {class_name} {{\n"
+            f"    {advisory or '// TODO: implement migrated behaviour'}\n"
+            "}\n"
+        )
+    if normalized in {"c#", "csharp", "dotnet"}:
+        namespace_line = f"namespace {package} {{\n" if package else ""
+        closing = "}\n" if package else ""
+        inner_indent = "    " if package else ""
+        return (
+            (namespace_line)
+            + f"{inner_indent}public class {class_name}\n"
+            + f"{inner_indent}{{\n"
+            + ("\n".join(f"{inner_indent}    {line}" for line in advisory.splitlines())
+               if advisory else f"{inner_indent}    // TODO: implement migrated behaviour")
+            + f"\n{inner_indent}}}\n"
+            + closing
+        )
+    if normalized in {"typescript", "javascript"}:
+        return (
+            f"export class {class_name} {{\n"
+            + ("\n".join(f"  {line}" for line in advisory.splitlines())
+               if advisory else "  // TODO: implement migrated behaviour")
+            + "\n}\n"
+        )
+    if normalized in {"go"}:
+        pkg = package or "migrated"
+        lines = [f"package {pkg}", "", f"// {class_name} TODO scaffold"]
+        if advisory:
+            lines.extend(advisory.splitlines())
+        lines.append(f"type {class_name} struct {{}}")
+        return "\n".join(lines) + "\n"
+    if normalized in {"rust"}:
+        lines = [f"pub struct {class_name} {{}}", ""]
+        if advisory:
+            lines.append(advisory.replace("//", "//"))
+        lines.append(
+            f"impl {class_name} {{\n    pub fn new() -> Self {{\n        // TODO: initialise scaffolded type\n        Self {{}}\n    }}\n}}\n"
+        )
+        return "\n".join(lines)
+
+    # Default plain text placeholder
+    lines = [
+        f"Stub for {class_name}",
+        "",
+        "This file was generated automatically. Provide the equivalent behaviour",
+        "for the migrated system following the guidance below:",
+        "",
+    ]
+    if advisory:
+        lines.extend(line.replace("// ", "- ") for line in advisory.splitlines())
+    else:
+        lines.append("- TODO: implement migrated behaviour")
+    return "\n".join(lines) + "\n"
+
+
+def _create_stub_file(
+    base_path: Path,
+    entry: Mapping[str, Any],
+    *,
+    target_language: str,
+) -> Dict[str, Any]:
+    result: Dict[str, Any] = {
+        "source": entry.get("source"),
+        "target_path": entry.get("target_path"),
+        "created": False,
+    }
+
+    rel_path = entry.get("target_path")
+    class_name = entry.get("class_name") or Path(str(entry.get("source") or "stub")).stem
+    package = entry.get("package")
+
+    if not isinstance(rel_path, str) or not rel_path.strip():
+        result["error"] = "missing target path"
+        return result
+
+    target_file = base_path / rel_path
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    if target_file.exists():
+        result["skipped_reason"] = "already exists"
+        return result
+
+    content = _stub_content(
+        target_language=target_language,
+        class_name=class_name,
+        package=package if isinstance(package, str) else None,
+        reason=str(entry.get("reason") or "TODO"),
+        expected_contract=entry.get("expected_contract")
+        if isinstance(entry.get("expected_contract"), str)
+        else None,
+        notes=entry.get("notes") if isinstance(entry.get("notes"), str) else None,
+    )
+    target_file.write_text(content, encoding="utf-8")
+    result.update({
+        "created": True,
+        "written_bytes": len(content.encode("utf-8")),
+    })
+    return result
+
+
 def print_section(title: str, content: str) -> None:
     line = "-" * (len(title) + 8)
     print(f"\n--- {title.upper()} ---\n{content}\n{line}")
@@ -223,6 +342,8 @@ def run_migration(
 
     architecture_map: Dict[str, Dict[str, str]] = {}
     compatibility_report: Dict[str, Any] = {}
+    scaffolding_blueprint: Dict[str, Any] = {}
+    stub_results: list[Dict[str, Any]] = []
 
     with tempfile.TemporaryDirectory(prefix="christophe_") as tmp:
         temp_dir = Path(tmp)
@@ -290,6 +411,21 @@ def run_migration(
             "Dependency snapshot captured %d dependencies across %d manifests",
             len(snapshot_dependencies),
             len(dependency_snapshot.get("manifests", []) or []),
+        )
+
+        blueprint_agent = ScaffoldingBlueprintAgent(
+            temp_dir, llm_service, cache_manager
+        )
+        scaffolding_blueprint = blueprint_agent.blueprint(
+            classification.get("source", []) or [],
+            architecture_map,
+            target_language=target_lang,
+            target_framework=target_framework,
+            dependencies=snapshot_dependencies,
+        )
+        logging.info(
+            "Blueprint prepared %d scaffolding entries",
+            len(scaffolding_blueprint.get("entries", [])),
         )
 
         recovery_path = target_path / "migration_state.json"
@@ -372,6 +508,24 @@ def run_migration(
             else:
                 logging.warning("Resource file %s missing from archive; skipping", res)
 
+        for entry in scaffolding_blueprint.get("entries", []):
+            if not isinstance(entry, Mapping):
+                continue
+            if not entry.get("requires_stub"):
+                continue
+            stub_info = _create_stub_file(
+                target_path,
+                entry,
+                target_language=target_lang,
+            )
+            stub_info["requires_stub"] = True
+            stub_results.append(stub_info)
+        if stub_results:
+            logging.info(
+                "Generated %d scaffolding stubs for manual completion",
+                sum(1 for item in stub_results if item.get("created")),
+            )
+
     token_usage = (
         llm_service.get_usage_summary()
         if hasattr(llm_service, "get_usage_summary")
@@ -405,6 +559,8 @@ def run_migration(
         "detected_stack": detected_stack,
         "plan": plan,
         "architecture": architecture_map,
+        "scaffolding_blueprint": scaffolding_blueprint,
+        "scaffolding_stubs": stub_results,
         "target_path": target_path,
         "output_root": output_root,
         "project_name": project_name,
@@ -492,6 +648,8 @@ def create_app(
             "detected_stack": migration.get("detected_stack"),
             "plan": migration.get("plan"),
             "architecture": migration.get("architecture"),
+            "scaffolding_blueprint": migration.get("scaffolding_blueprint"),
+            "scaffolding_stubs": migration.get("scaffolding_stubs"),
             "compatibility": migration.get("compatibility"),
             "error": None,
         }
@@ -745,6 +903,8 @@ def create_app(
                         "output_path": str(migration["target_path"]),
                         "detected_stack": migration["detected_stack"],
                         "architecture": migration.get("architecture", {}),
+                        "scaffolding_blueprint": migration.get("scaffolding_blueprint", {}),
+                        "scaffolding_stubs": migration.get("scaffolding_stubs", []),
                         "compatibility": migration.get("compatibility", {}),
                         "plan": migration["plan"],
                         "classification": migration["classification"],
