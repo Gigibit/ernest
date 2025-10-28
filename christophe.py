@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -668,6 +669,51 @@ def create_app(
     app.secret_key = os.environ.get("CHRISTOPHE_WEB_SECRET", "christophe-dev-secret")
     app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024  # 512 MB uploads
 
+    brand_name = "Ernest"
+    brand_surname = "Christophe"
+    brand_context = {
+        "brand_name": brand_name,
+        "brand_surname": brand_surname,
+        "brand_full": f"{brand_name} {brand_surname}".strip(),
+    }
+
+    @app.context_processor
+    def inject_brand() -> Dict[str, Any]:
+        return dict(brand_context)
+
+    def _interpret_flag(value: Optional[str]) -> Optional[bool]:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if not normalized:
+            return None
+        if normalized in {"1", "true", "yes", "on", "enabled"}:
+            return True
+        if normalized in {"0", "false", "no", "off", "disabled"}:
+            return False
+        return None
+
+    raw_whitelist = os.environ.get("CHRISTOPHE_PASSPHRASE_WHITELIST", "")
+    passphrase_whitelist = {
+        candidate.strip()
+        for candidate in re.split(r"[,\n;]", raw_whitelist)
+        if candidate and candidate.strip()
+    }
+    whitelist_override = _interpret_flag(
+        os.environ.get("CHRISTOPHE_PASSPHRASE_WHITELIST_ENABLED")
+    )
+    whitelist_enabled = bool(passphrase_whitelist)
+    if whitelist_override is not None:
+        whitelist_enabled = bool(passphrase_whitelist) and whitelist_override
+
+    app.config["PASSPHRASE_WHITELIST_ENABLED"] = whitelist_enabled
+    app.config["PASSPHRASE_WHITELIST"] = passphrase_whitelist
+
+    def _is_passphrase_allowed(candidate: str) -> bool:
+        if not whitelist_enabled:
+            return True
+        return candidate in passphrase_whitelist
+
     llm_service = llm or LLMService(_resolved_profiles())
     cache_manager = cache or CacheManager(Path(".cache/migration_cache.db"))
     executor = ThreadPoolExecutor(
@@ -914,11 +960,21 @@ def create_app(
             if not passphrase:
                 errors.append("Passphrase is required.")
             else:
-                auth_result = user_store.authenticate(passphrase)
-                session["user_id"] = auth_result["user_id"]
-                session["token"] = auth_result["token"]
-                return redirect(url_for("index"))
-        return render_template("login.html", errors=errors)
+                if not _is_passphrase_allowed(passphrase):
+                    app.logger.warning("Rejected login attempt with non-whitelisted passphrase")
+                    errors.append(
+                        "Passphrase is not authorised for this preview."
+                    )
+                else:
+                    auth_result = user_store.authenticate(passphrase)
+                    session["user_id"] = auth_result["user_id"]
+                    session["token"] = auth_result["token"]
+                    return redirect(url_for("index"))
+        return render_template(
+            "login.html",
+            errors=errors,
+            whitelist_active=whitelist_enabled,
+        )
 
     @app.route("/", methods=["GET", "POST"])
     def index() -> Any:
@@ -1050,7 +1106,15 @@ def create_app(
         )
         if not passphrase:
             return ({"error": "passphrase is required"}, 400)
-        auth_result = user_store.authenticate(passphrase.strip())
+        sanitized = passphrase.strip()
+        if not sanitized:
+            return ({"error": "passphrase is required"}, 400)
+        if not _is_passphrase_allowed(sanitized):
+            app.logger.warning(
+                "Rejected API token request with non-whitelisted passphrase"
+            )
+            return ({"error": "passphrase not authorised"}, 403)
+        auth_result = user_store.authenticate(sanitized)
         return (
             {
                 "user_id": auth_result["user_id"],
