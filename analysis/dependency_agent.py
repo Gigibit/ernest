@@ -6,35 +6,11 @@ import json
 import logging
 import textwrap
 from pathlib import Path
-from typing import Dict, List, Mapping
+from typing import Dict, List, Mapping, Tuple
 
 from core.cache_manager import CacheManager
 from core.file_utils import read_head
 from core.llm_service import LLMService
-
-
-_DEPENDENCY_FILENAMES = {
-    "requirements.txt",
-    "pipfile",
-    "pipfile.lock",
-    "poetry.lock",
-    "pyproject.toml",
-    "package.json",
-    "package-lock.json",
-    "yarn.lock",
-    "pnpm-lock.yaml",
-    "composer.json",
-    "go.mod",
-    "go.sum",
-    "pom.xml",
-    "build.gradle",
-    "build.gradle.kts",
-    "gradle.lockfile",
-    "Gemfile",
-    "Gemfile.lock",
-    "Cargo.toml",
-    "Cargo.lock",
-}
 
 
 class DependencyAnalysisAgent:
@@ -51,14 +27,51 @@ class DependencyAnalysisAgent:
     def discover_manifests(self) -> List[str]:
         """Return relative paths of files that likely describe dependencies."""
 
-        manifests: List[str] = []
-        for path in self.project_root.rglob("*"):
-            if not path.is_file():
+        listing, truncated = self._collect_file_listing()
+
+        if not listing:
+            return []
+
+        prompt = textwrap.dedent(
+            """
+            You review project directory trees to identify files that declare dependencies.
+            The list below contains relative file paths from the project root, one per line.
+            Return ONLY JSON of the form {"manifests": ["path", ...]} with the files that most likely define dependencies for build, package, or module managers.
+            If no dependency manifests are present, respond with {"manifests": []}.
+            Do not invent paths that are not present in the listing.
+            """
+        ).strip()
+
+        if truncated:
+            prompt += "\nThe listing may be truncated; prioritise conventional manifest names when unsure."
+
+        prompt += "\n--- FILE LISTING ---\n" + "\n".join(listing)
+
+        cache_key = self.llm.prompt_hash("dependency", prompt)
+        cached = self.cache.get(cache_key)
+        if isinstance(cached, list):
+            manifests = cached
+        elif isinstance(cached, Mapping):
+            manifests = cached.get("manifests")
+        else:
+            response = self.llm.invoke("dependency", prompt, max_new_tokens=400)
+            result = self._extract_json(response)
+            manifests = result.get("manifests") if isinstance(result, Mapping) else []
+            self.cache.set(cache_key, manifests)
+
+        resolved: List[str] = []
+        for manifest in manifests or []:
+            if not isinstance(manifest, str):
                 continue
-            if path.name.lower() in _DEPENDENCY_FILENAMES:
-                manifests.append(str(path.relative_to(self.project_root)))
-        manifests.sort()
-        return manifests
+            path = (self.project_root / manifest).resolve()
+            try:
+                path.relative_to(self.project_root.resolve())
+            except ValueError:
+                continue
+            if path.is_file():
+                resolved.append(str(path.relative_to(self.project_root)))
+
+        return sorted(set(resolved))
 
     def extract_dependencies(
         self,
@@ -137,6 +150,18 @@ class DependencyAnalysisAgent:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+    def _collect_file_listing(self, limit: int = 800) -> Tuple[List[str], bool]:
+        """Return a bounded listing of project files for LLM manifest discovery."""
+
+        listing: List[str] = []
+        for path in sorted(self.project_root.rglob("*")):
+            if not path.is_file():
+                continue
+            listing.append(str(path.relative_to(self.project_root)))
+            if len(listing) >= limit:
+                return listing, True
+        return listing, False
+
     @staticmethod
     def _extract_json(text: str) -> Mapping[str, object]:
         import re

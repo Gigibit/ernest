@@ -1,6 +1,7 @@
 # christophe.py
-# o gioia, ch'io conobbi, esser amato amando!
-"""CLI and web front-end for the migration orchestrator."""
+"""CLI and web front-end for the migration orchestrator. 
+o gioia, ch'io conobbi, esser amato amando!
+"""
 
 from __future__ import annotations
 
