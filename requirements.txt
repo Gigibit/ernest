@@ -6,3 +6,4 @@ bitsandbytes
 huggingface_hub[cli]
 Flask
 protobuf
+sentencepiece
