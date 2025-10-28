@@ -3,8 +3,6 @@ from __future__ import annotations
 """CLI and web front-end for the migration orchestrator."""
 """oh gioia ch'io conobbi, essere amato, amando!"""
 
-from __future__ import annotations
-
 import json
 import logging
 import os
@@ -727,6 +725,63 @@ def create_app(
             "Project %s for user %s queued for background processing", project_id, user_id
         )
 
+    def _schedule_web_migration(
+        *,
+        user_id: str,
+        project_id: str,
+        archive_path: Path,
+        target_framework: str,
+        target_lang: str,
+        src_lang: Optional[str],
+        src_framework: Optional[str],
+        page_size: Optional[int],
+        refine_passes: int,
+        safe_mode: bool,
+    ) -> None:
+        user_output_root = web_output_root / user_id / project_id
+        user_output_root.mkdir(parents=True, exist_ok=True)
+
+        def _runner() -> None:
+            try:
+                app.logger.info(
+                    "Project %s for user %s moved to processing (web)", project_id, user_id
+                )
+                user_store.update_project(
+                    user_id,
+                    project_id,
+                    status="processing",
+                    error=None,
+                    started_at=_timestamp(),
+                )
+                migration = run_migration(
+                    archive_path,
+                    target_framework,
+                    target_lang,
+                    src_lang=src_lang,
+                    src_framework=src_framework,
+                    reuse_cache=True,
+                    output_root=user_output_root,
+                    llm=llm_service,
+                    cache=cache_manager,
+                    page_size=page_size,
+                    refine_passes=refine_passes,
+                    safe_mode=safe_mode,
+                )
+            except Exception as exc:  # noqa: BLE001
+                app.logger.exception("Web migration failed for project %s", project_id)
+                _finalise_failure(user_id, project_id, str(exc))
+            else:
+                _finalise_success(user_id, project_id, migration)
+            finally:
+                archive_path.unlink(missing_ok=True)
+
+        executor.submit(_runner)
+        app.logger.info(
+            "Project %s for user %s queued for background processing (web)",
+            project_id,
+            user_id,
+        )
+
     def _group_projects(user_id: str) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
         def _timestamp_key(record: Dict[str, Any], *, completed: bool) -> tuple[int, str]:
             candidates = []
@@ -864,66 +919,65 @@ def create_app(
 
             if not errors and uploaded:
                 filename = secure_filename(uploaded.filename)
-                suffix = Path(filename).suffix or ".zip"
-                project_record = user_store.create_project(
-                    user_id,
-                    name=Path(filename).stem,
-                    original_filename=uploaded.filename,
-                    target_framework=target_framework,
-                    target_language=target_lang,
-                )
-                temp_zip_path: Optional[Path] = None
-                try:
-                    user_output_root = web_output_root / user_id
-                    user_output_root.mkdir(parents=True, exist_ok=True)
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
-                        uploaded.save(tmp_file)
-                        temp_zip_path = Path(tmp_file.name)
-                    migration = run_migration(
-                        temp_zip_path,
-                        target_framework,
-                        target_lang,
-                        src_lang=src_lang,
-                        src_framework=src_framework,
-                        reuse_cache=True,
-                        output_root=user_output_root,
-                        llm=llm_service,
-                        cache=cache_manager,
-                        page_size=page_size_int,
-                        refine_passes=refine_passes_int,
-                        safe_mode=safe_mode_enabled,
-                    )
-                    final_record = _finalise_success(user_id, project_record["id"], migration)
-                    safe_mode_result = migration.get("safe_mode", safe_mode_enabled)
-                    result_payload = {
-                        "project_id": final_record.get("id"),
-                        "status": final_record.get("status"),
-                        "completed_at": final_record.get("completed_at"),
-                        "updated_at": final_record.get("updated_at"),
-                        "project_name": migration["project_name"],
-                        "output_path": str(migration["target_path"]),
-                        "detected_stack": migration["detected_stack"],
-                        "architecture": migration.get("architecture", {}),
-                        "scaffolding_blueprint": migration.get("scaffolding_blueprint", {}),
-                        "scaffolding_stubs": migration.get("scaffolding_stubs", []),
-                        "compatibility": migration.get("compatibility", {}),
-                        "plan": migration["plan"],
-                        "classification": migration["classification"],
-                        "dependencies": migration.get("dependencies", {}),
-                        "dependency_resolution": migration.get("dependency_resolution", {}),
-                        "token_usage": migration.get("token_usage", {}),
-                        "cost_estimate": migration.get("cost_estimate", {}),
-                        "safe_mode": safe_mode_result,
-                        "download_url": url_for("download_project", project_id=final_record.get("id")),
+                if not filename:
+                    errors.append("Nome file non valido per l'upload.")
+                else:
+                    queued_at = _timestamp()
+                    metadata = {
+                        "queued_at": queued_at,
+                        "safe_mode": safe_mode_enabled,
+                        "page_size": page_size_int,
+                        "refine_passes": refine_passes_int,
+                        "error": None,
                     }
-                except Exception as exc:  # noqa: BLE001
-                    app.logger.exception("Migration failed")
-                    errors.append(str(exc))
-                    if project_record is not None:
-                        _finalise_failure(user_id, project_record["id"], str(exc))
-                finally:
-                    if temp_zip_path is not None:
-                        temp_zip_path.unlink(missing_ok=True)
+                    project_record = user_store.create_project(
+                        user_id,
+                        name=Path(filename).stem,
+                        original_filename=uploaded.filename,
+                        target_framework=target_framework,
+                        target_language=target_lang,
+                        status="queued",
+                        metadata=metadata,
+                    )
+                    try:
+                        incoming_dir = web_output_root / user_id / project_record["id"] / "incoming"
+                        incoming_dir.mkdir(parents=True, exist_ok=True)
+                        archive_target = incoming_dir / filename
+                        uploaded.save(str(archive_target))
+                        user_store.update_project(
+                            user_id,
+                            project_record["id"],
+                            status="queued",
+                            error=None,
+                            queued_at=project_record.get("queued_at", queued_at),
+                            safe_mode=safe_mode_enabled,
+                            page_size=page_size_int,
+                            refine_passes=refine_passes_int,
+                        )
+                        _schedule_web_migration(
+                            user_id=user_id,
+                            project_id=project_record["id"],
+                            archive_path=archive_target,
+                            target_framework=target_framework,
+                            target_lang=target_lang,
+                            src_lang=src_lang,
+                            src_framework=src_framework,
+                            page_size=page_size_int,
+                            refine_passes=refine_passes_int,
+                            safe_mode=safe_mode_enabled,
+                        )
+                        result_payload = {
+                            "project_id": project_record.get("id"),
+                            "project_name": project_record.get("name"),
+                            "status": "queued",
+                            "queued_at": project_record.get("queued_at", queued_at),
+                            "message": "Richiesta accettata. Ci vorrà un po', verrai notificato quando è pronto.",
+                        }
+                    except Exception as exc:  # noqa: BLE001
+                        app.logger.exception("Unable to queue migration")
+                        errors.append(str(exc))
+                        if project_record is not None:
+                            _finalise_failure(user_id, project_record["id"], str(exc))
 
         pending_projects, completed_projects = _group_projects(user_id)
 
