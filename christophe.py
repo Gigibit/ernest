@@ -85,7 +85,7 @@ def run_migration(
     if hasattr(llm_service, "reset_usage"):
         llm_service.reset_usage()
 
-    logging.info("Starting migration for %%s", zip_path)
+    logging.info("Starting migration for %s", zip_path)
 
     with tempfile.TemporaryDirectory(prefix="christophe_") as tmp:
         temp_dir = Path(tmp)
@@ -164,7 +164,7 @@ def run_migration(
     if close_cache:
         cache_manager.close()
 
-    logging.info("Migration completed for %%s", zip_path)
+    logging.info("Migration completed for %s", zip_path)
 
     return {
         "classification": classification,

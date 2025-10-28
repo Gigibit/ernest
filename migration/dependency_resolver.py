@@ -158,7 +158,7 @@ class DependencyResolver:
                 str(output_path),
                 str(url),
             ]
-            logging.info("Downloading dependency %%s from %%s", item.get("name"), url)
+            logging.info("Downloading dependency %s from %s", item.get("name"), url)
             try:
                 result = subprocess.run(
                     cmd,
