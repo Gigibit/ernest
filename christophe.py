@@ -33,6 +33,7 @@ from migration.dependency_resolver import DependencyResolver
 from migration.recovery_manager import RecoveryManager
 from migration.resource_migrator import ResourceMigrator
 from migration.source_migrator import SourceMigrator
+from planning.architecture_agent import ArchitecturePlanner
 from planning.planning_agent import PlanningAgent
 from scaffolding.scaffolding_agent import ScaffoldingAgent
 
@@ -40,6 +41,7 @@ from scaffolding.scaffolding_agent import ScaffoldingAgent
 DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
     "classify": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 512, "temp": 0.1},
     "analyze": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 512, "temp": 0.1},
+    "architecture": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1024, "temp": 0.1},
     "translate": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 4096, "temp": 0.0},
     "adapt": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1024, "temp": 0.0},
     "scaffold": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 2048, "temp": 0.1},
@@ -217,6 +219,8 @@ def run_migration(
 
     logging.info("Starting migration for %s", zip_path)
 
+    architecture_map: Dict[str, Dict[str, str]] = {}
+
     with tempfile.TemporaryDirectory(prefix="christophe_") as tmp:
         temp_dir = Path(tmp)
         logging.info("Unpacking archive %s into %s", zip_path, temp_dir)
@@ -255,8 +259,19 @@ def run_migration(
         plan = PlanningAgent().create_plan({}, classification.get("source", []))
         logging.info("Planning produced %d source artefacts", len(plan))
 
-        scaffold_agent = ScaffoldingAgent(llm_service, cache_manager)
         project_name = Path(zip_path.stem).name.replace("-", "_") or "migrated_project"
+        architecture_planner = ArchitecturePlanner(temp_dir, llm_service, cache_manager)
+        architecture_map = architecture_planner.propose(
+            plan,
+            target_language=target_lang,
+            target_framework=target_framework,
+            project_name=project_name,
+        )
+        logging.info(
+            "Architecture planner prepared %d mappings", len(architecture_map)
+        )
+
+        scaffold_agent = ScaffoldingAgent(llm_service, cache_manager)
         target_path = scaffold_agent.generate(
             output_root, project_name, target_framework, target_lang
         )
@@ -303,7 +318,12 @@ def run_migration(
                 logging.warning("Source file %s missing from archive; marked skipped", src)
                 continue
 
-            destination = target_path / "src" / Path(src).with_suffix(".java").name
+            arch_entry = architecture_map.get(src, {})
+            destination_rel = arch_entry.get("target_path") if arch_entry else None
+            if destination_rel:
+                destination = target_path / destination_rel
+            else:
+                destination = target_path / "src" / Path(src).with_suffix(".java").name
             logging.info(
                 "[%d/%d] Translating source artefact %s -> %s",
                 index,
@@ -314,6 +334,10 @@ def run_migration(
             src_migrator.translate_legacy_backend(
                 source_file,
                 destination,
+                target_language=target_lang,
+                target_framework=target_framework,
+                target_package=arch_entry.get("package") if arch_entry else None,
+                architecture_notes=arch_entry.get("notes") if arch_entry else None,
                 page_size=page_size,
                 refine_passes=refine_passes,
                 safe_mode=safe_mode,
@@ -363,6 +387,7 @@ def run_migration(
         "classification": classification,
         "detected_stack": detected_stack,
         "plan": plan,
+        "architecture": architecture_map,
         "target_path": target_path,
         "output_root": output_root,
         "project_name": project_name,
@@ -448,6 +473,7 @@ def create_app(
             "project_name": migration.get("project_name"),
             "detected_stack": migration.get("detected_stack"),
             "plan": migration.get("plan"),
+            "architecture": migration.get("architecture"),
             "error": None,
         }
         record = user_store.update_project(user_id, project_id, **metadata) or metadata
@@ -696,6 +722,7 @@ def create_app(
                         "project_name": migration["project_name"],
                         "output_path": str(migration["target_path"]),
                         "detected_stack": migration["detected_stack"],
+                        "architecture": migration.get("architecture", {}),
                         "plan": migration["plan"],
                         "classification": migration["classification"],
                         "dependencies": migration.get("dependencies", {}),

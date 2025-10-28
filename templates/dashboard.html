@@ -477,6 +477,12 @@
                         {% if project.cost_estimate %}
                         <pre class="detail-block">{{ project.cost_estimate | tojson(indent=2) }}</pre>
                         {% endif %}
+                        {% if project.architecture %}
+                        <details class="detail-block">
+                            <summary>Architecture mapping</summary>
+                            <pre>{{ project.architecture | tojson(indent=2) }}</pre>
+                        </details>
+                        {% endif %}
                         {% if project.error %}
                         <div class="detail-block" role="alert">{{ project.error }}</div>
                         {% endif %}
@@ -499,6 +505,10 @@
             <p><strong>Detected stack:</strong></p>
             <pre>{{ result.detected_stack | tojson(indent=2) }}</pre>
             <p><strong>Safe mode:</strong> {{ 'enabled' if result.safe_mode else 'disabled' }}</p>
+            {% if result.architecture %}
+            <p><strong>Architecture mapping:</strong></p>
+            <pre>{{ result.architecture | tojson(indent=2) }}</pre>
+            {% endif %}
             <p><strong>Migration plan:</strong></p>
             <ul>
             {% for step in result.plan %}

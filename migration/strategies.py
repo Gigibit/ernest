@@ -84,23 +84,46 @@ class TranslationStrategy:
     ) -> str:
         """Compose the prompt for a single chunk."""
 
+        def _clean(value: str | None) -> str:
+            return value.strip() if isinstance(value, str) else ""
+
         guidance = (
             "You are helping a migration effort. "
             f"The legacy context is {self.source_descriptor}. "
             f"Rebuild it so it fits {self.target_descriptor}."
         )
         directives = self.instructions.strip()
+        language_hint = _clean(context.get("target_language"))
+        framework_hint = _clean(context.get("target_framework"))
+        package_hint = _clean(context.get("target_package"))
+        extras = []
+        if language_hint:
+            extras.append(
+                f"Ensure the translated result is valid {language_hint} that compiles without manual fixes."
+            )
+        if framework_hint:
+            extras.append(
+                f"Allinea la struttura alle convenzioni di {framework_hint} (annotazioni, directory, build layout)."
+            )
+        if package_hint:
+            extras.append(
+                f"Dichiara il package {package_hint} e organizza import e nomi coerentemente."
+            )
+        if extras:
+            addition = " ".join(extras)
+            directives = f"{directives}\n{addition}" if directives else addition
         if fallback and self.fallback_instructions:
             appendix = self.fallback_instructions.strip()
             directives = f"{directives}\n{appendix}" if directives else appendix
         if directives:
             guidance = f"{guidance}\n{directives}"
 
+        target_label = language_hint or self.target_language.strip()
         return (
             f"{guidance}"
             f"{self._format_context(context)}\n\n"
             f"SOURCE CHUNK [{chunk_index}]:\n{chunk}\n\n"
-            f"Return ONLY {self.target_language.strip()} with no commentary,"
+            f"Return ONLY {target_label} with no commentary,"
             f" TODO markers, or markdown fences. Ensure the output compiles"
             f" cleanly."
         )
@@ -162,6 +185,10 @@ DEFAULT_STRATEGIES: Dict[str, TranslationStrategy] = {
         context_labels={
             "structure_outline": "SOURCE STRUCTURE",
             "integration_contracts": "INTEGRATION CONTRACTS",
+            "target_language": "TARGET LANGUAGE",
+            "target_framework": "TARGET FRAMEWORK",
+            "target_package": "TARGET PACKAGE",
+            "architecture_notes": "ARCHITECTURE NOTES",
         },
         refine_instructions=(
             "Rivedi il modulo migrato, elimina residui legacy (commenti, TODO, "
@@ -198,6 +225,10 @@ DEFAULT_STRATEGIES: Dict[str, TranslationStrategy] = {
         max_new_tokens=2048,
         context_labels={
             "runtime_configuration": "RUNTIME CONFIGURATION",
+            "target_language": "TARGET LANGUAGE",
+            "target_framework": "TARGET FRAMEWORK",
+            "target_package": "TARGET PACKAGE",
+            "architecture_notes": "ARCHITECTURE NOTES",
         },
         refine_instructions=(
             "Ottimizza annotazioni, gestione dipendenze e naming affinché il "
@@ -232,6 +263,10 @@ DEFAULT_STRATEGIES: Dict[str, TranslationStrategy] = {
         max_new_tokens=1536,
         context_labels={
             "shared_dependencies": "SHARED DEPENDENCIES",
+            "target_language": "TARGET LANGUAGE",
+            "target_framework": "TARGET FRAMEWORK",
+            "target_package": "TARGET PACKAGE",
+            "architecture_notes": "ARCHITECTURE NOTES",
         },
         refine_instructions=(
             "Affina hook, proprietà e tipizzazione rimuovendo residui della UI "

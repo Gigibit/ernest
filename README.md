@@ -62,6 +62,20 @@ python christophe.py your_project.zip --target-framework "modern service stack" 
 The web form includes a *Safe mode* checkbox (checked by default).  Uncheck it
 to force raw translations without fallback retries.
 
+## Architecture-aware target layouts
+
+`ArchitecturePlanner` analyses representative source snippets before any
+translation occurs and produces a canonical destination layout for every legacy
+artefact. The LLM-backed proposal (cached for repeat runs) captures destination
+paths, Java package names, and optional notes aligned with the selected target
+language/framework. The planner falls back to deterministic heuristics so Java
+migrations always land under `src/main/java` with sanitised package hierarchies
+even when the LLM response is noisy.
+
+The resulting architecture map is stored alongside each migration, exposed via
+the API, and visible in the dashboard so you can audit how source files were
+reorganised without opening the generated archive.
+
 ## Authenticated workspaces and project tracking
 
 Launching the Flask server now presents a lightweight authentication screen.
