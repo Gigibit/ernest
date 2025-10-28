@@ -1,0 +1,633 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Christophe Migration Portal</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #f4f6fb;
+            --surface: #ffffff;
+            --surface-muted: #f8fafc;
+            --primary: #4f46e5;
+            --primary-soft: #6366f1;
+            --text-strong: #0f172a;
+            --text: #1e293b;
+            --text-muted: #475569;
+            --border: #e2e8f0;
+            --danger: #ef4444;
+        }
+
+        *, *::before, *::after { box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 0;
+            line-height: 1.5;
+        }
+
+        a { color: inherit; }
+
+        .container {
+            max-width: 1080px;
+            margin: 40px auto;
+            background: var(--surface);
+            padding: 32px;
+            border-radius: 18px;
+            box-shadow: 0 20px 45px rgba(15, 23, 42, 0.12);
+        }
+
+        header.top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 24px;
+        }
+
+        header.top h1 { margin: 0; color: var(--text-strong); letter-spacing: -0.01em; }
+
+        header.top .subtitle { margin: 6px 0 0; color: var(--text-muted); }
+
+        .account { text-align: right; color: var(--text); }
+
+        .account code {
+            background: rgba(99, 102, 241, 0.1);
+            padding: 4px 8px;
+            border-radius: 6px;
+            display: inline-block;
+            font-family: 'Fira Code', 'Source Code Pro', monospace;
+        }
+
+        .logout {
+            display: inline-block;
+            margin-top: 8px;
+            color: var(--danger);
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        form {
+            margin-top: 32px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 20px;
+            align-items: flex-start;
+        }
+
+        label { display: block; font-weight: 600; margin-bottom: 6px; color: #334155; }
+
+        label .label-row {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        input[type="text"],
+        input[type="number"] {
+            width: 100%;
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid #cbd5f5;
+            font-size: 15px;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            background: var(--surface-muted);
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+            outline: none;
+        }
+
+        .tooltip {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            border-radius: 999px;
+            background: var(--primary);
+            color: #fff;
+            font-size: 12px;
+            cursor: help;
+        }
+
+        .tooltip::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            left: 50%;
+            transform: translate(-50%, -6px);
+            bottom: 125%;
+            background: rgba(15, 23, 42, 0.92);
+            color: #f8fafc;
+            padding: 8px 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            min-width: 220px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s ease, transform 0.2s ease;
+            box-shadow: 0 10px 30px rgba(15, 23, 42, 0.25);
+        }
+
+        .tooltip::before {
+            content: '';
+            position: absolute;
+            bottom: 115%;
+            left: 50%;
+            transform: translateX(-50%);
+            border-width: 6px;
+            border-style: solid;
+            border-color: rgba(15, 23, 42, 0.92) transparent transparent transparent;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .tooltip:focus::after,
+        .tooltip:focus::before,
+        .tooltip:hover::after,
+        .tooltip:hover::before {
+            opacity: 1;
+            transform: translate(-50%, -12px);
+        }
+
+        .tooltip:focus-visible { outline: 2px solid rgba(99, 102, 241, 0.6); outline-offset: 2px; }
+
+        .drop-zone {
+            grid-column: 1 / -1;
+            border: 2px dashed var(--primary);
+            border-radius: 14px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            background: rgba(99, 102, 241, 0.05);
+            transition: background 0.2s, border-color 0.2s, transform 0.2s;
+        }
+
+        .drop-zone.dragover {
+            background: rgba(99, 102, 241, 0.15);
+            border-color: var(--primary-soft);
+            transform: translateY(-2px);
+        }
+
+        .drop-zone p { margin: 0; color: #4338ca; font-weight: 600; }
+
+        button {
+            grid-column: 1 / -1;
+            background: linear-gradient(135deg, var(--primary), var(--primary-soft));
+            color: white;
+            border: none;
+            border-radius: 12px;
+            padding: 14px 18px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 14px 35px rgba(79, 70, 229, 0.3);
+            transition: transform 0.15s ease, box-shadow 0.2s ease;
+        }
+
+        button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 18px 40px rgba(79, 70, 229, 0.35);
+        }
+
+        button:focus-visible {
+            outline: 3px solid rgba(99, 102, 241, 0.55);
+            outline-offset: 3px;
+        }
+
+        .messages { grid-column: 1 / -1; }
+
+        .error {
+            background: #fee2e2;
+            color: #b91c1c;
+            padding: 12px 16px;
+            border-radius: 10px;
+            margin-bottom: 12px;
+        }
+
+        .projects-section { margin-top: 36px; }
+
+        .projects-section h2 { margin-bottom: 12px; color: #312e81; }
+
+        .projects-list { display: grid; gap: 16px; }
+
+        .project-card {
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 18px;
+            background: var(--surface-muted);
+        }
+
+        .project-card.completed { background: #eef2ff; border-color: #c7d2fe; }
+
+        .project-card.failed { background: #fef2f2; border-color: #fecaca; }
+
+        .project-card .title { font-weight: 600; color: #1e1b4b; }
+
+        .project-card .meta { margin-top: 6px; font-size: 13px; color: var(--text-muted); }
+
+        .project-card .error-text { margin-top: 10px; color: #b91c1c; font-weight: 600; }
+
+        .project-card .download {
+            display: inline-block;
+            margin-top: 12px;
+            padding: 8px 14px;
+            border-radius: 8px;
+            background: var(--primary);
+            color: #fff;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .project-card .download:hover { background: #4338ca; }
+
+        .toggle {
+            grid-column: 1 / -1;
+            background: var(--surface-muted);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 18px;
+        }
+
+        .checkbox-label { display: flex; align-items: center; gap: 12px; font-weight: 600; color: var(--text); }
+
+        .checkbox-label input { width: 20px; height: 20px; accent-color: var(--primary); }
+
+        .hint { margin-top: 8px; font-size: 13px; color: var(--text-muted); }
+
+        .empty { color: #64748b; font-style: italic; }
+
+        .result {
+            background: #eef2ff;
+            color: #1e1b4b;
+            padding: 20px 24px;
+            border-radius: 12px;
+            margin-top: 32px;
+        }
+
+        .result pre {
+            background: rgba(15, 23, 42, 0.85);
+            color: #e2e8f0;
+            padding: 16px;
+            border-radius: 10px;
+            overflow-x: auto;
+        }
+
+        footer { margin-top: 48px; text-align: center; color: #64748b; font-size: 14px; }
+
+        @media (max-width: 720px) {
+            .container { margin: 24px; padding: 24px; }
+            header.top { flex-direction: column; align-items: stretch; text-align: left; }
+            .account { text-align: left; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="top">
+            <div>
+                <h1>Christophe Migration Portal</h1>
+                <p class="subtitle">Upload a ZIP archive and orchestrate safe, paginated migrations.</p>
+            </div>
+            <div class="account">
+                <div>Workspace <code>{{ user_id }}</code></div>
+                <div>API token</div>
+                <code>{{ user_token }}</code>
+                <div><a class="logout" href="{{ url_for('logout') }}">Log out</a></div>
+            </div>
+        </header>
+        <form method="post" enctype="multipart/form-data">
+            <div>
+                <label for="target_framework">Target framework</label>
+                <input id="target_framework" name="target_framework" type="text" value="{{ defaults.target_framework }}" placeholder="e.g. modern service platform">
+            </div>
+            <div>
+                <label for="target_lang">Target language</label>
+                <input id="target_lang" name="target_lang" type="text" value="{{ defaults.target_lang }}" placeholder="e.g. Java">
+            </div>
+            <div>
+                <label for="src_lang">Source language (optional)</label>
+                <input id="src_lang" name="src_lang" type="text" value="{{ defaults.src_lang }}" placeholder="e.g. legacy batch language">
+            </div>
+            <div>
+                <label for="src_framework">Source framework (optional)</label>
+                <input id="src_framework" name="src_framework" type="text" value="{{ defaults.src_framework }}" placeholder="e.g. on-prem enterprise platform">
+            </div>
+            <div>
+                <label for="page_size">Pagination size (chunks per pass)</label>
+                <input id="page_size" name="page_size" type="number" min="0" step="1" value="{{ defaults.page_size }}" placeholder="e.g. 5">
+            </div>
+            <div>
+                <label for="refine_passes">
+                    <span class="label-row">
+                        <span>Refinement passes per page</span>
+                        <span class="tooltip" tabindex="0" role="note" data-tooltip="How many extra polish attempts each page receives after the first translation run." title="How many extra polish attempts each page receives after the first translation run.">?</span>
+                    </span>
+                </label>
+                <input id="refine_passes" name="refine_passes" type="number" min="0" step="1" value="{{ defaults.refine_passes }}" placeholder="e.g. 1">
+            </div>
+            <div class="toggle">
+                <label class="checkbox-label" for="safe_mode">
+                    <input id="safe_mode" name="safe_mode" type="checkbox" value="1" {% if defaults.safe_mode %}checked{% endif %}>
+                    Safe mode (fallback guardrails)
+                </label>
+                <div class="hint">Automatically retries risky chunks with strict prompts to avoid conflicts and incomplete files.</div>
+            </div>
+            <div class="drop-zone" id="drop-zone">
+                <p id="drop-zone-text">Drag &amp; drop your source ZIP or click to browse</p>
+                <input id="source_zip" name="source_zip" type="file" accept=".zip" hidden required>
+            </div>
+            <div class="messages">
+            {% if errors %}
+                <div class="error">
+                    <ul>
+                    {% for err in errors %}
+                        <li>{{ err }}</li>
+                    {% endfor %}
+                    </ul>
+                </div>
+            {% endif %}
+            </div>
+            <button type="submit">Run migration</button>
+        </form>
+        <section class="projects-section">
+            <h2>Active uploads</h2>
+            <div class="projects-list" id="active-projects">
+                {% for project in pending_projects %}
+                <div class="project-card {% if project.status == 'failed' %}failed{% endif %}">
+                    <div class="title">{{ project.name }}</div>
+                    <div class="meta">Status: {{ project.status }} • Updated: {{ project.updated_at }}</div>
+                    <div class="meta">Original: {{ project.original_filename }}</div>
+                    {% if project.error %}
+                    <div class="error-text">{{ project.error }}</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            <p class="empty" id="active-empty" {% if pending_projects %}style="display:none;"{% endif %}>No active migrations.</p>
+        </section>
+        <section class="projects-section">
+            <h2>Completed migrations</h2>
+            <div class="projects-list" id="completed-projects">
+                {% for project in completed_projects %}
+                <div class="project-card completed">
+                    <div class="title">{{ project.name }}</div>
+                    <div class="meta">Status: {{ project.status }} • Updated: {{ project.updated_at }}</div>
+                    <div class="meta">Finished: {{ project.completed_at or project.updated_at }}</div>
+                    <div class="meta">Output: {{ project.download_name }}</div>
+                    {% if project.cost_estimate %}
+                    <pre class="meta">{{ project.cost_estimate | tojson(indent=2) }}</pre>
+                    {% endif %}
+                    {% if project.error %}
+                    <div class="error-text">{{ project.error }}</div>
+                    {% endif %}
+                    {% if project.download_url %}
+                    <a class="download" href="{{ project.download_url }}">Download archive</a>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            <p class="empty" id="completed-empty" {% if completed_projects %}style="display:none;"{% endif %}>No completed migrations yet.</p>
+        </section>
+        {% if result %}
+        <div class="result">
+            <h2>Latest migration</h2>
+            <p><strong>Project:</strong> {{ result.project_name }}</p>
+            <p><strong>Output directory:</strong> {{ result.output_path }}</p>
+            {% if result.download_url %}<p><strong>Archive:</strong> <a href="{{ result.download_url }}">Download</a></p>{% endif %}
+            <p><strong>Detected stack:</strong></p>
+            <pre>{{ result.detected_stack | tojson(indent=2) }}</pre>
+            <p><strong>Safe mode:</strong> {{ 'enabled' if result.safe_mode else 'disabled' }}</p>
+            <p><strong>Migration plan:</strong></p>
+            <ul>
+            {% for step in result.plan %}
+                <li>{{ step }}</li>
+            {% endfor %}
+            </ul>
+            <p><strong>Classification summary:</strong></p>
+            <pre>{{ result.classification | tojson(indent=2) }}</pre>
+            {% if result.dependencies %}
+            <p><strong>Dependency manifests:</strong></p>
+            <pre>{{ result.dependencies | tojson(indent=2) }}</pre>
+            {% endif %}
+            {% if result.dependency_resolution %}
+            <p><strong>Dependency handling:</strong></p>
+            <pre>{{ result.dependency_resolution | tojson(indent=2) }}</pre>
+            {% endif %}
+            {% if result.token_usage %}
+            <p><strong>Token usage:</strong></p>
+            <pre>{{ result.token_usage | tojson(indent=2) }}</pre>
+            {% endif %}
+            {% if result.cost_estimate %}
+            <p><strong>H100 cost estimate:</strong></p>
+            <pre>{{ result.cost_estimate | tojson(indent=2) }}</pre>
+            {% endif %}
+        </div>
+        {% endif %}
+        <footer>
+            Powered by Christophe — upload, track, and download your migrated projects securely.
+        </footer>
+    </div>
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const dropZoneText = document.getElementById('drop-zone-text');
+        const fileInput = document.getElementById('source_zip');
+
+        if (dropZone) {
+            dropZone.addEventListener('click', () => fileInput.click());
+
+            fileInput.addEventListener('change', () => {
+                if (fileInput.files.length > 0) {
+                    dropZoneText.textContent = fileInput.files[0].name;
+                }
+            });
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropZone.addEventListener(eventName, (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    dropZone.classList.add('dragover');
+                });
+            });
+
+            ['dragleave', 'dragend'].forEach(eventName => {
+                dropZone.addEventListener(eventName, (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    dropZone.classList.remove('dragover');
+                });
+            });
+
+            dropZone.addEventListener('drop', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                dropZone.classList.remove('dragover');
+                const files = event.dataTransfer.files;
+                if (files.length > 0) {
+                    const file = files[0];
+                    if (!file.name.toLowerCase().endsWith('.zip')) {
+                        alert('Please drop a .zip archive');
+                        return;
+                    }
+                    fileInput.files = files;
+                    dropZoneText.textContent = file.name;
+                }
+            });
+        }
+    </script>
+    <script>
+        (function () {
+            const token = {{ user_token | tojson }};
+            const projectsUrl = {{ url_for('api_projects') | tojson }};
+            const initialPending = {{ pending_projects | tojson }};
+            const initialCompleted = {{ completed_projects | tojson }};
+            const activeContainer = document.getElementById('active-projects');
+            const completedContainer = document.getElementById('completed-projects');
+            const activeEmpty = document.getElementById('active-empty');
+            const completedEmpty = document.getElementById('completed-empty');
+            const pollInterval = 5000;
+
+            function renderProjects(projects, container, emptyElement, mode) {
+                if (!container || !emptyElement) {
+                    return;
+                }
+                container.innerHTML = '';
+                if (!projects || projects.length === 0) {
+                    emptyElement.style.display = 'block';
+                    return;
+                }
+                emptyElement.style.display = 'none';
+                projects.forEach((project) => {
+                    container.appendChild(buildCard(project, mode));
+                });
+            }
+
+            function buildCard(project, mode) {
+                const card = document.createElement('div');
+                card.className = 'project-card';
+                const status = (project.status || 'unknown').toLowerCase();
+                if (mode === 'completed') {
+                    card.classList.add('completed');
+                } else if (status === 'failed') {
+                    card.classList.add('failed');
+                }
+
+                const title = document.createElement('div');
+                title.className = 'title';
+                title.textContent = project.name || project.project_name || project.id || 'Unnamed project';
+                card.appendChild(title);
+
+                const statusLine = document.createElement('div');
+                statusLine.className = 'meta';
+                const updatedValue = project.updated_at || project.completed_at || '';
+                statusLine.textContent = `Status: ${project.status || 'unknown'} • Updated: ${updatedValue}`;
+                card.appendChild(statusLine);
+
+                if (project.original_filename) {
+                    const original = document.createElement('div');
+                    original.className = 'meta';
+                    original.textContent = `Original: ${project.original_filename}`;
+                    card.appendChild(original);
+                }
+
+                if (mode === 'completed') {
+                    const finished = document.createElement('div');
+                    finished.className = 'meta';
+                    finished.textContent = `Finished: ${project.completed_at || project.updated_at || ''}`;
+                    card.appendChild(finished);
+
+                    if (project.download_name) {
+                        const output = document.createElement('div');
+                        output.className = 'meta';
+                        output.textContent = `Output: ${project.download_name}`;
+                        card.appendChild(output);
+                    }
+
+                    if (project.cost_estimate) {
+                        const cost = document.createElement('pre');
+                        cost.className = 'meta';
+                        try {
+                            cost.textContent = JSON.stringify(project.cost_estimate, null, 2);
+                        } catch (error) {
+                            cost.textContent = String(project.cost_estimate);
+                        }
+                        card.appendChild(cost);
+                    }
+
+                    if (project.download_url) {
+                        const downloadLink = document.createElement('a');
+                        downloadLink.className = 'download';
+                        let downloadHref = project.download_url;
+                        if (token && typeof downloadHref === 'string' && downloadHref.includes('/api/')) {
+                            const separator = downloadHref.includes('?') ? '&' : '?';
+                            downloadHref = `${downloadHref}${separator}token=${encodeURIComponent(token)}`;
+                        }
+                        downloadLink.href = downloadHref;
+                        downloadLink.textContent = 'Download archive';
+                        card.appendChild(downloadLink);
+                    }
+                }
+
+                if (project.error) {
+                    const error = document.createElement('div');
+                    error.className = 'error-text';
+                    error.textContent = project.error;
+                    card.appendChild(error);
+                }
+
+                return card;
+            }
+
+            function partitionProjects(projects) {
+                const pending = [];
+                const completed = [];
+                (projects || []).forEach((project) => {
+                    if (project.status === 'completed' && project.archive_path) {
+                        completed.push(project);
+                    } else {
+                        pending.push(project);
+                    }
+                });
+                return { pending, completed };
+            }
+
+            function applyData(pending, completed) {
+                renderProjects(pending, activeContainer, activeEmpty, 'pending');
+                renderProjects(completed, completedContainer, completedEmpty, 'completed');
+            }
+
+            applyData(initialPending || [], initialCompleted || []);
+
+            if (!token || !projectsUrl) {
+                return;
+            }
+
+            async function pollProjects() {
+                try {
+                    const response = await fetch(projectsUrl, {
+                        headers: { Authorization: `Bearer ${token}` },
+                    });
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                    const payload = await response.json();
+                    const projects = Array.isArray(payload.projects) ? payload.projects : [];
+                    const groups = partitionProjects(projects);
+                    applyData(groups.pending, groups.completed);
+                } catch (error) {
+                    console.error('Project polling failed', error);
+                }
+            }
+
+            pollProjects();
+            setInterval(pollProjects, pollInterval);
+        })();
+    </script>
+</body>
+</html>
