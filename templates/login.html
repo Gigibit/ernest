@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Authenticate - Christophe</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f172a; margin: 0; padding: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+        .login-container { background: #fff; padding: 36px 40px; border-radius: 16px; box-shadow: 0 20px 45px rgba(15, 23, 42, 0.25); max-width: 420px; width: 100%; }
+        h1 { margin-top: 0; color: #1e1b4b; }
+        p { color: #475569; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; color: #334155; }
+        input[type="password"] { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid #cbd5f5; font-size: 16px; }
+        button { margin-top: 18px; width: 100%; padding: 14px; border: none; border-radius: 12px; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; font-size: 16px; font-weight: 600; cursor: pointer; }
+        button:hover { transform: translateY(-1px); box-shadow: 0 18px 40px rgba(79, 70, 229, 0.35); }
+        .error { background: #fee2e2; color: #b91c1c; padding: 12px 16px; border-radius: 10px; margin-bottom: 12px; }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h1>Christophe Portal</h1>
+        <p>Use your passphrase to create or access your personal migration workspace.</p>
+        {% if errors %}
+        <div class="error">
+            <ul>
+            {% for err in errors %}
+                <li>{{ err }}</li>
+            {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+        <form method="post">
+            <label for="passphrase">Passphrase</label>
+            <input id="passphrase" name="passphrase" type="password" required autocomplete="current-password">
+            <button type="submit">Continue</button>
+        </form>
+    </div>
+</body>
+</html>
