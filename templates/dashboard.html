@@ -4,43 +4,288 @@
     <meta charset="utf-8">
     <title>Christophe Migration Portal</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f6fb; margin: 0; padding: 0; }
-        .container { max-width: 1080px; margin: 40px auto; background: #fff; padding: 32px; border-radius: 16px; box-shadow: 0 20px 45px rgba(15, 23, 42, 0.12); }
-        header.top { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
-        header.top h1 { margin: 0; color: #0f172a; }
-        header.top .subtitle { margin: 6px 0 0; color: #475569; }
-        .account { text-align: right; color: #1e293b; }
-        .account code { background: rgba(99, 102, 241, 0.1); padding: 4px 8px; border-radius: 6px; display: inline-block; }
-        .logout { display: inline-block; margin-top: 8px; color: #ef4444; text-decoration: none; font-weight: 600; }
-        form { margin-top: 32px; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; align-items: flex-start; }
+        :root {
+            color-scheme: light;
+            --bg: #f4f6fb;
+            --surface: #ffffff;
+            --surface-muted: #f8fafc;
+            --primary: #4f46e5;
+            --primary-soft: #6366f1;
+            --text-strong: #0f172a;
+            --text: #1e293b;
+            --text-muted: #475569;
+            --border: #e2e8f0;
+            --danger: #ef4444;
+        }
+
+        *, *::before, *::after { box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 0;
+            line-height: 1.5;
+        }
+
+        a { color: inherit; }
+
+        .container {
+            max-width: 1080px;
+            margin: 40px auto;
+            background: var(--surface);
+            padding: 32px;
+            border-radius: 18px;
+            box-shadow: 0 20px 45px rgba(15, 23, 42, 0.12);
+        }
+
+        header.top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 24px;
+        }
+
+        header.top h1 { margin: 0; color: var(--text-strong); letter-spacing: -0.01em; }
+
+        header.top .subtitle { margin: 6px 0 0; color: var(--text-muted); }
+
+        .account { text-align: right; color: var(--text); }
+
+        .account code {
+            background: rgba(99, 102, 241, 0.1);
+            padding: 4px 8px;
+            border-radius: 6px;
+            display: inline-block;
+            font-family: 'Fira Code', 'Source Code Pro', monospace;
+        }
+
+        .logout {
+            display: inline-block;
+            margin-top: 8px;
+            color: var(--danger);
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        form {
+            margin-top: 32px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 20px;
+            align-items: flex-start;
+        }
+
         label { display: block; font-weight: 600; margin-bottom: 6px; color: #334155; }
-        input[type="text"], input[type="number"] { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #cbd5f5; font-size: 15px; }
-        .drop-zone { grid-column: 1 / -1; border: 2px dashed #6366f1; border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; background: rgba(99, 102, 241, 0.05); transition: background 0.2s, border-color 0.2s; }
-        .drop-zone.dragover { background: rgba(99, 102, 241, 0.15); border-color: #4f46e5; }
+
+        label .label-row {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        input[type="text"],
+        input[type="number"] {
+            width: 100%;
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid #cbd5f5;
+            font-size: 15px;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            background: var(--surface-muted);
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+            outline: none;
+        }
+
+        .tooltip {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            border-radius: 999px;
+            background: var(--primary);
+            color: #fff;
+            font-size: 12px;
+            cursor: help;
+        }
+
+        .tooltip::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            left: 50%;
+            transform: translate(-50%, -6px);
+            bottom: 125%;
+            background: rgba(15, 23, 42, 0.92);
+            color: #f8fafc;
+            padding: 8px 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            min-width: 220px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s ease, transform 0.2s ease;
+            box-shadow: 0 10px 30px rgba(15, 23, 42, 0.25);
+        }
+
+        .tooltip::before {
+            content: '';
+            position: absolute;
+            bottom: 115%;
+            left: 50%;
+            transform: translateX(-50%);
+            border-width: 6px;
+            border-style: solid;
+            border-color: rgba(15, 23, 42, 0.92) transparent transparent transparent;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .tooltip:focus::after,
+        .tooltip:focus::before,
+        .tooltip:hover::after,
+        .tooltip:hover::before {
+            opacity: 1;
+            transform: translate(-50%, -12px);
+        }
+
+        .tooltip:focus-visible { outline: 2px solid rgba(99, 102, 241, 0.6); outline-offset: 2px; }
+
+        .drop-zone {
+            grid-column: 1 / -1;
+            border: 2px dashed var(--primary);
+            border-radius: 14px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            background: rgba(99, 102, 241, 0.05);
+            transition: background 0.2s, border-color 0.2s, transform 0.2s;
+        }
+
+        .drop-zone.dragover {
+            background: rgba(99, 102, 241, 0.15);
+            border-color: var(--primary-soft);
+            transform: translateY(-2px);
+        }
+
         .drop-zone p { margin: 0; color: #4338ca; font-weight: 600; }
-        button { grid-column: 1 / -1; background: linear-gradient(135deg, #4f46e5, #6366f1); color: white; border: none; border-radius: 12px; padding: 14px 18px; font-size: 16px; font-weight: 600; cursor: pointer; box-shadow: 0 14px 35px rgba(79, 70, 229, 0.3); transition: transform 0.15s ease, box-shadow 0.2s ease; }
-        button:hover { transform: translateY(-1px); box-shadow: 0 18px 40px rgba(79, 70, 229, 0.35); }
+
+        button {
+            grid-column: 1 / -1;
+            background: linear-gradient(135deg, var(--primary), var(--primary-soft));
+            color: white;
+            border: none;
+            border-radius: 12px;
+            padding: 14px 18px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 14px 35px rgba(79, 70, 229, 0.3);
+            transition: transform 0.15s ease, box-shadow 0.2s ease;
+        }
+
+        button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 18px 40px rgba(79, 70, 229, 0.35);
+        }
+
+        button:focus-visible {
+            outline: 3px solid rgba(99, 102, 241, 0.55);
+            outline-offset: 3px;
+        }
+
         .messages { grid-column: 1 / -1; }
-        .error { background: #fee2e2; color: #b91c1c; padding: 12px 16px; border-radius: 10px; margin-bottom: 12px; }
+
+        .error {
+            background: #fee2e2;
+            color: #b91c1c;
+            padding: 12px 16px;
+            border-radius: 10px;
+            margin-bottom: 12px;
+        }
+
         .projects-section { margin-top: 36px; }
+
         .projects-section h2 { margin-bottom: 12px; color: #312e81; }
+
         .projects-list { display: grid; gap: 16px; }
-        .project-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; background: #f8fafc; }
+
+        .project-card {
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 18px;
+            background: var(--surface-muted);
+        }
+
         .project-card.completed { background: #eef2ff; border-color: #c7d2fe; }
+
         .project-card.failed { background: #fef2f2; border-color: #fecaca; }
+
         .project-card .title { font-weight: 600; color: #1e1b4b; }
-        .project-card .meta { margin-top: 6px; font-size: 13px; color: #475569; }
+
+        .project-card .meta { margin-top: 6px; font-size: 13px; color: var(--text-muted); }
+
         .project-card .error-text { margin-top: 10px; color: #b91c1c; font-weight: 600; }
-        .project-card .download { display: inline-block; margin-top: 12px; padding: 8px 14px; border-radius: 8px; background: #4f46e5; color: #fff; text-decoration: none; font-weight: 600; }
+
+        .project-card .download {
+            display: inline-block;
+            margin-top: 12px;
+            padding: 8px 14px;
+            border-radius: 8px;
+            background: var(--primary);
+            color: #fff;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
         .project-card .download:hover { background: #4338ca; }
-        .toggle { grid-column: 1 / -1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 18px; }
-        .checkbox-label { display: flex; align-items: center; gap: 12px; font-weight: 600; color: #1e293b; }
-        .checkbox-label input { width: 20px; height: 20px; }
-        .hint { margin-top: 8px; font-size: 13px; color: #475569; }
+
+        .toggle {
+            grid-column: 1 / -1;
+            background: var(--surface-muted);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 18px;
+        }
+
+        .checkbox-label { display: flex; align-items: center; gap: 12px; font-weight: 600; color: var(--text); }
+
+        .checkbox-label input { width: 20px; height: 20px; accent-color: var(--primary); }
+
+        .hint { margin-top: 8px; font-size: 13px; color: var(--text-muted); }
+
         .empty { color: #64748b; font-style: italic; }
-        .result { background: #eef2ff; color: #1e1b4b; padding: 20px 24px; border-radius: 12px; margin-top: 32px; }
-        .result pre { background: rgba(15, 23, 42, 0.85); color: #e2e8f0; padding: 16px; border-radius: 10px; overflow-x: auto; }
+
+        .result {
+            background: #eef2ff;
+            color: #1e1b4b;
+            padding: 20px 24px;
+            border-radius: 12px;
+            margin-top: 32px;
+        }
+
+        .result pre {
+            background: rgba(15, 23, 42, 0.85);
+            color: #e2e8f0;
+            padding: 16px;
+            border-radius: 10px;
+            overflow-x: auto;
+        }
+
         footer { margin-top: 48px; text-align: center; color: #64748b; font-size: 14px; }
+
+        @media (max-width: 720px) {
+            .container { margin: 24px; padding: 24px; }
+            header.top { flex-direction: column; align-items: stretch; text-align: left; }
+            .account { text-align: left; }
+        }
     </style>
 </head>
 <body>
@@ -79,7 +324,12 @@
                 <input id="page_size" name="page_size" type="number" min="0" step="1" value="{{ defaults.page_size }}" placeholder="e.g. 5">
             </div>
             <div>
-                <label for="refine_passes">Refinement passes per page</label>
+                <label for="refine_passes">
+                    <span class="label-row">
+                        <span>Refinement passes per page</span>
+                        <span class="tooltip" tabindex="0" role="note" data-tooltip="How many extra polish attempts each page receives after the first translation run." title="How many extra polish attempts each page receives after the first translation run.">?</span>
+                    </span>
+                </label>
                 <input id="refine_passes" name="refine_passes" type="number" min="0" step="1" value="{{ defaults.refine_passes }}" placeholder="e.g. 1">
             </div>
             <div class="toggle">

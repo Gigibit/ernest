@@ -104,6 +104,23 @@ by calling `POST /api/migrate` with a multipart form payload:
 The response returns the migration plan, the detected (or user-provided)
 stack, token usage, and an estimated hardware receipt.
 
+## Serving the Flask application
+
+The CLI doubles as the entry point for the authenticated Flask portal. Install
+the dependencies and launch the server with the `--serve` flag:
+
+```bash
+pip install -r requirements.txt
+python christophe.py --serve --host 0.0.0.0 --port 5000
+```
+
+`--host` and `--port` are optional; adjust them to expose the UI on a different
+interface or port. When the server starts you can open `http://<host>:<port>` in
+the browser, enter a passphrase to create or resume your workspace, and begin
+uploading archives from the dashboard. Use `Ctrl+C` in the terminal to stop the
+server when you are done.
+
+
 ### Obtaining API tokens
 
 Before calling `/api/migrate`, exchange your passphrase for a bearer token via
