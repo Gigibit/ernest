@@ -62,6 +62,28 @@ python christophe.py your_project.zip --target-framework "modern service stack" 
 The web form includes a *Safe mode* checkbox (checked by default).  Uncheck it
 to force raw translations without fallback retries.
 
+## Authenticated workspaces and project tracking
+
+Launching the Flask server now presents a lightweight authentication screen.
+Enter any passphrase to create your personal workspace; subsequent logins with
+the same passphrase reopen the same workspace.  After authentication the portal
+shows:
+
+* your workspace identifier and API token (displayed in the header);
+* an upload form for new migrations;
+* a list of active/failed runs, including error messages when something goes
+  wrong;
+* a catalogue of completed projects with direct download links to the generated
+  archives and cost/token breakdowns.
+
+Each migration is recorded asynchronously, so long-running runs remain visible
+under *Active uploads* until completion.  Completed migrations move to the
+dedicated section and remain downloadable as long as the output archive exists
+on disk.
+
+Use the *Log out* link in the header to clear the current session and return to
+the passphrase prompt.
+
 ## REST API for automated migrations
 
 When the Flask server is running you can trigger migrations programmatically
@@ -81,6 +103,34 @@ by calling `POST /api/migrate` with a multipart form payload:
 
 The response returns the migration plan, the detected (or user-provided)
 stack, token usage, and an estimated hardware receipt.
+
+### Obtaining API tokens
+
+Before calling `/api/migrate`, exchange your passphrase for a bearer token via
+`POST /api/auth`:
+
+```bash
+curl -X POST http://localhost:5000/api/auth \
+  -H 'Content-Type: application/json' \
+  -d '{"passphrase": "my secret"}'
+```
+
+The response contains a `token` field and the `user_id` of the associated
+workspace.  Include the token in subsequent calls via `Authorization: Bearer
+<token>` or the `auth_token` query parameter.  Tokens are tied to each
+workspace; attempting to access another workspace’s data returns `401`.
+
+### Listing and downloading projects via API
+
+Two additional endpoints expose the migration catalogue:
+
+* `GET /api/projects` returns every tracked migration for the authenticated
+  workspace, including status, metadata, and download URLs for completed
+  archives.
+* `GET /api/projects/<project_id>/download` streams the ZIP archive for a
+  completed migration.  Requests with missing/invalid tokens or mismatched
+  workspace IDs receive `401`, and attempting to download a project owned by a
+  different workspace returns `404`.
 
 ## Token accounting and cost receipt
 

@@ -1,5 +1,6 @@
 # christophe.py
-"""CLI and web front-end for the migration orchestrator. 
+"""CLI and web front-end for the migration orchestrator."""
+"""
 o gioia, ch'io conobbi, esser amato amando!
 """
 
@@ -7,7 +8,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import shutil
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -18,6 +22,7 @@ from core.cache_manager import CacheManager
 from core.cost_model import estimate_h100_receipt
 from core.file_utils import secure_unzip
 from core.llm_service import LLMService
+from core.user_store import UserStore
 from migration.dependency_resolver import DependencyResolver
 from migration.recovery_manager import RecoveryManager
 from migration.resource_migrator import ResourceMigrator
@@ -182,17 +187,93 @@ def create_app(
     *,
     output_root: Optional[Path] = None,
 ) -> "Flask":
-    """Create a Flask application exposing the migration pipeline."""
+    """Create a Flask application exposing the migration pipeline with auth."""
 
-    from flask import Flask, render_template_string, request
+    from flask import (
+        Flask,
+        abort,
+        g,
+        redirect,
+        render_template_string,
+        request,
+        send_file,
+        session,
+        url_for,
+    )
     from werkzeug.utils import secure_filename
 
     app = Flask(__name__)
+    app.secret_key = os.environ.get("CHRISTOPHE_WEB_SECRET", "christophe-dev-secret")
     app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024  # 512 MB uploads
 
     llm_service = llm or LLMService(DEFAULT_PROFILES)
     cache_manager = cache or CacheManager(Path(".cache/migration_cache.db"))
-    web_output_root = output_root or Path("output_project/web")
+
+    base_output_root = output_root or Path("output_project")
+    web_output_root = base_output_root / "web"
+    api_output_root = base_output_root / "api"
+    web_output_root.mkdir(parents=True, exist_ok=True)
+    api_output_root.mkdir(parents=True, exist_ok=True)
+
+    store_path = Path(os.environ.get("CHRISTOPHE_USER_STORE", ".cache/users.json"))
+    user_store = UserStore(store_path)
+
+    def _timestamp() -> str:
+        return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+    def _extract_token(req: Any) -> Optional[str]:
+        header = req.headers.get("Authorization", "") if hasattr(req, "headers") else ""
+        if header.lower().startswith("bearer "):
+            return header.split(" ", 1)[1].strip()
+        return (
+            req.headers.get("X-Auth-Token")
+            if hasattr(req, "headers") and req.headers.get("X-Auth-Token")
+            else None
+        ) or req.values.get("auth_token") or req.values.get("token") or req.values.get("access_token")
+
+    def _finalise_success(user_id: str, project_id: str, migration: Dict[str, Any]) -> Dict[str, Any]:
+        archive_file = shutil.make_archive(
+            str(migration["target_path"]),
+            "zip",
+            root_dir=migration["target_path"],
+        )
+        archive_path = Path(archive_file)
+        metadata = {
+            "status": "completed",
+            "completed_at": _timestamp(),
+            "output_path": str(migration["target_path"]),
+            "archive_path": str(archive_path),
+            "download_name": archive_path.name,
+            "token_usage": migration.get("token_usage", {}),
+            "cost_estimate": migration.get("cost_estimate", {}),
+            "safe_mode": migration.get("safe_mode"),
+            "project_name": migration.get("project_name"),
+            "detected_stack": migration.get("detected_stack"),
+            "plan": migration.get("plan"),
+        }
+        return user_store.update_project(user_id, project_id, **metadata) or metadata
+
+    def _finalise_failure(user_id: str, project_id: str, message: str) -> None:
+        user_store.update_project(
+            user_id,
+            project_id,
+            status="failed",
+            error=message,
+        )
+
+    def _group_projects(user_id: str) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
+        pending: list[Dict[str, Any]] = []
+        completed: list[Dict[str, Any]] = []
+        for project in user_store.list_projects(user_id):
+            entry = dict(project)
+            if entry.get("status") == "completed" and entry.get("archive_path"):
+                entry["download_url"] = url_for("download_project", project_id=entry["id"])
+                completed.append(entry)
+            else:
+                pending.append(entry)
+        pending.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
+        completed.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
+        return pending, completed
 
     PAGE_TEMPLATE = """
     <!doctype html>
@@ -202,11 +283,16 @@ def create_app(
         <title>Christophe Migration Portal</title>
         <style>
             body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f6fb; margin: 0; padding: 0; }
-            .container { max-width: 960px; margin: 40px auto; background: #fff; padding: 32px; border-radius: 16px; box-shadow: 0 20px 45px rgba(15, 23, 42, 0.12); }
-            h1 { margin-top: 0; color: #0f172a; }
-            form { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; align-items: flex-start; }
+            .container { max-width: 1080px; margin: 40px auto; background: #fff; padding: 32px; border-radius: 16px; box-shadow: 0 20px 45px rgba(15, 23, 42, 0.12); }
+            header.top { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
+            header.top h1 { margin: 0; color: #0f172a; }
+            header.top .subtitle { margin: 6px 0 0; color: #475569; }
+            .account { text-align: right; color: #1e293b; }
+            .account code { background: rgba(99, 102, 241, 0.1); padding: 4px 8px; border-radius: 6px; display: inline-block; }
+            .logout { display: inline-block; margin-top: 8px; color: #ef4444; text-decoration: none; font-weight: 600; }
+            form { margin-top: 32px; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; align-items: flex-start; }
             label { display: block; font-weight: 600; margin-bottom: 6px; color: #334155; }
-            input[type="text"] { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #cbd5f5; font-size: 15px; }
+            input[type="text"], input[type="number"] { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #cbd5f5; font-size: 15px; }
             .drop-zone { grid-column: 1 / -1; border: 2px dashed #6366f1; border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; background: rgba(99, 102, 241, 0.05); transition: background 0.2s, border-color 0.2s; }
             .drop-zone.dragover { background: rgba(99, 102, 241, 0.15); border-color: #4f46e5; }
             .drop-zone p { margin: 0; color: #4338ca; font-weight: 600; }
@@ -214,19 +300,41 @@ def create_app(
             button:hover { transform: translateY(-1px); box-shadow: 0 18px 40px rgba(79, 70, 229, 0.35); }
             .messages { grid-column: 1 / -1; }
             .error { background: #fee2e2; color: #b91c1c; padding: 12px 16px; border-radius: 10px; margin-bottom: 12px; }
-            .result { background: #eef2ff; color: #1e1b4b; padding: 20px 24px; border-radius: 12px; margin-top: 28px; }
-            .result pre { background: rgba(15, 23, 42, 0.85); color: #e2e8f0; padding: 16px; border-radius: 10px; overflow-x: auto; }
-            ul { padding-left: 20px; }
-            footer { margin-top: 48px; text-align: center; color: #64748b; font-size: 14px; }
+            .projects-section { margin-top: 36px; }
+            .projects-section h2 { margin-bottom: 12px; color: #312e81; }
+            .projects-list { display: grid; gap: 16px; }
+            .project-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; background: #f8fafc; }
+            .project-card.completed { background: #eef2ff; border-color: #c7d2fe; }
+            .project-card.failed { background: #fef2f2; border-color: #fecaca; }
+            .project-card .title { font-weight: 600; color: #1e1b4b; }
+            .project-card .meta { margin-top: 6px; font-size: 13px; color: #475569; }
+            .project-card .error-text { margin-top: 10px; color: #b91c1c; font-weight: 600; }
+            .project-card .download { display: inline-block; margin-top: 12px; padding: 8px 14px; border-radius: 8px; background: #4f46e5; color: #fff; text-decoration: none; font-weight: 600; }
+            .project-card .download:hover { background: #4338ca; }
             .toggle { grid-column: 1 / -1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 18px; }
             .checkbox-label { display: flex; align-items: center; gap: 12px; font-weight: 600; color: #1e293b; }
             .checkbox-label input { width: 20px; height: 20px; }
             .hint { margin-top: 8px; font-size: 13px; color: #475569; }
+            .empty { color: #64748b; font-style: italic; }
+            .result { background: #eef2ff; color: #1e1b4b; padding: 20px 24px; border-radius: 12px; margin-top: 32px; }
+            .result pre { background: rgba(15, 23, 42, 0.85); color: #e2e8f0; padding: 16px; border-radius: 10px; overflow-x: auto; }
+            footer { margin-top: 48px; text-align: center; color: #64748b; font-size: 14px; }
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>Christophe Migration Portal</h1>
+            <header class="top">
+                <div>
+                    <h1>Christophe Migration Portal</h1>
+                    <p class="subtitle">Upload a ZIP archive and orchestrate safe, paginated migrations.</p>
+                </div>
+                <div class="account">
+                    <div>Workspace <code>{{ user_id }}</code></div>
+                    <div>API token</div>
+                    <code>{{ user_token }}</code>
+                    <div><a class="logout" href="{{ url_for('logout') }}">Log out</a></div>
+                </div>
+            </header>
             <form method="post" enctype="multipart/form-data">
                 <div>
                     <label for="target_framework">Target framework</label>
@@ -257,7 +365,7 @@ def create_app(
                         <input id="safe_mode" name="safe_mode" type="checkbox" value="1" {% if defaults.safe_mode %}checked{% endif %}>
                         Safe mode (fallback guardrails)
                     </label>
-                    <div class="hint">Riesegue automaticamente i chunk sospetti con prompt severi per ridurre conflitti e codice incompleto.</div>
+                    <div class="hint">Automatically retries risky chunks with strict prompts to avoid conflicts and incomplete files.</div>
                 </div>
                 <div class="drop-zone" id="drop-zone">
                     <p id="drop-zone-text">Drag &amp; drop your source ZIP or click to browse</p>
@@ -276,11 +384,51 @@ def create_app(
                 </div>
                 <button type="submit">Run migration</button>
             </form>
+            <section class="projects-section">
+                <h2>Active uploads</h2>
+                {% if pending_projects %}
+                <div class="projects-list">
+                    {% for project in pending_projects %}
+                    <div class="project-card {% if project.status == 'failed' %}failed{% endif %}">
+                        <div class="title">{{ project.name }}</div>
+                        <div class="meta">Status: {{ project.status }} • Updated: {{ project.updated_at }}</div>
+                        <div class="meta">Original: {{ project.original_filename }}</div>
+                        {% if project.error %}
+                        <div class="error-text">{{ project.error }}</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="empty">No active migrations.</p>
+                {% endif %}
+            </section>
+            <section class="projects-section">
+                <h2>Completed migrations</h2>
+                {% if completed_projects %}
+                <div class="projects-list">
+                    {% for project in completed_projects %}
+                    <div class="project-card completed">
+                        <div class="title">{{ project.name }}</div>
+                        <div class="meta">Finished: {{ project.completed_at or project.updated_at }}</div>
+                        <div class="meta">Output: {{ project.download_name }}</div>
+                        {% if project.cost_estimate %}
+                        <pre class="meta">{{ project.cost_estimate | tojson(indent=2) }}</pre>
+                        {% endif %}
+                        <a class="download" href="{{ project.download_url }}">Download archive</a>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="empty">No completed migrations yet.</p>
+                {% endif %}
+            </section>
             {% if result %}
             <div class="result">
-                <h2>Migration result</h2>
+                <h2>Latest migration</h2>
                 <p><strong>Project:</strong> {{ result.project_name }}</p>
                 <p><strong>Output directory:</strong> {{ result.output_path }}</p>
+                {% if result.download_url %}<p><strong>Archive:</strong> <a href="{{ result.download_url }}">Download</a></p>{% endif %}
                 <p><strong>Detected stack:</strong></p>
                 <pre>{{ result.detected_stack | tojson(indent=2) }}</pre>
                 <p><strong>Safe mode:</strong> {{ 'enabled' if result.safe_mode else 'disabled' }}</p>
@@ -311,7 +459,7 @@ def create_app(
             </div>
             {% endif %}
             <footer>
-                Powered by Christophe — upload a ZIP archive and select the destination stack to begin.
+                Powered by Christophe — upload, track, and download your migrated projects securely.
             </footer>
         </div>
         <script>
@@ -319,52 +467,131 @@ def create_app(
             const dropZoneText = document.getElementById('drop-zone-text');
             const fileInput = document.getElementById('source_zip');
 
-            dropZone.addEventListener('click', () => fileInput.click());
+            if (dropZone) {
+                dropZone.addEventListener('click', () => fileInput.click());
 
-            fileInput.addEventListener('change', () => {
-                if (fileInput.files.length > 0) {
-                    dropZoneText.textContent = fileInput.files[0].name;
-                }
-            });
-
-            ['dragenter', 'dragover'].forEach(eventName => {
-                dropZone.addEventListener(eventName, (event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    dropZone.classList.add('dragover');
+                fileInput.addEventListener('change', () => {
+                    if (fileInput.files.length > 0) {
+                        dropZoneText.textContent = fileInput.files[0].name;
+                    }
                 });
-            });
 
-            ['dragleave', 'dragend'].forEach(eventName => {
-                dropZone.addEventListener(eventName, (event) => {
+                ['dragenter', 'dragover'].forEach(eventName => {
+                    dropZone.addEventListener(eventName, (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        dropZone.classList.add('dragover');
+                    });
+                });
+
+                ['dragleave', 'dragend'].forEach(eventName => {
+                    dropZone.addEventListener(eventName, (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        dropZone.classList.remove('dragover');
+                    });
+                });
+
+                dropZone.addEventListener('drop', (event) => {
                     event.preventDefault();
                     event.stopPropagation();
                     dropZone.classList.remove('dragover');
-                });
-            });
-
-            dropZone.addEventListener('drop', (event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                dropZone.classList.remove('dragover');
-                const files = event.dataTransfer.files;
-                if (files.length > 0) {
-                    const file = files[0];
-                    if (!file.name.toLowerCase().endsWith('.zip')) {
-                        alert('Please drop a .zip archive');
-                        return;
+                    const files = event.dataTransfer.files;
+                    if (files.length > 0) {
+                        const file = files[0];
+                        if (!file.name.toLowerCase().endsWith('.zip')) {
+                            alert('Please drop a .zip archive');
+                            return;
+                        }
+                        fileInput.files = files;
+                        dropZoneText.textContent = file.name;
                     }
-                    fileInput.files = files;
-                    dropZoneText.textContent = file.name;
-                }
-            });
+                });
+            }
         </script>
     </body>
     </html>
     """
 
+    LOGIN_TEMPLATE = """
+    <!doctype html>
+    <html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <title>Authenticate - Christophe</title>
+        <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f172a; margin: 0; padding: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+            .login-container { background: #fff; padding: 36px 40px; border-radius: 16px; box-shadow: 0 20px 45px rgba(15, 23, 42, 0.25); max-width: 420px; width: 100%; }
+            h1 { margin-top: 0; color: #1e1b4b; }
+            p { color: #475569; }
+            label { display: block; margin-bottom: 8px; font-weight: 600; color: #334155; }
+            input[type="password"] { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid #cbd5f5; font-size: 16px; }
+            button { margin-top: 18px; width: 100%; padding: 14px; border: none; border-radius: 12px; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; font-size: 16px; font-weight: 600; cursor: pointer; }
+            .error { background: #fee2e2; color: #b91c1c; padding: 12px 16px; border-radius: 10px; margin-bottom: 12px; }
+        </style>
+    </head>
+    <body>
+        <div class="login-container">
+            <h1>Christophe Portal</h1>
+            <p>Use your passphrase to create or access your personal migration workspace.</p>
+            {% if errors %}
+            <div class="error">
+                <ul>
+                {% for err in errors %}
+                    <li>{{ err }}</li>
+                {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+            <form method="post">
+                <label for="passphrase">Passphrase</label>
+                <input id="passphrase" name="passphrase" type="password" required autocomplete="current-password">
+                <button type="submit">Continue</button>
+            </form>
+        </div>
+    </body>
+    </html>
+    """
+
+    @app.before_request
+    def load_user() -> None:
+        user_id = session.get("user_id")
+        g.user = None
+        g.auth_token = None
+        if not user_id:
+            return
+        user = user_store.get_user(user_id)
+        if not user:
+            session.clear()
+            return
+        g.user = user
+        g.auth_token = user.get("token")
+
+    @app.route("/logout")
+    def logout():
+        session.clear()
+        return redirect(url_for("auth"))
+
+    @app.route("/auth", methods=["GET", "POST"])
+    @app.route("/login", methods=["GET", "POST"])
+    def auth():
+        errors: list[str] = []
+        if request.method == "POST":
+            passphrase = (request.form.get("passphrase") or "").strip()
+            if not passphrase:
+                errors.append("Passphrase is required.")
+            else:
+                auth_result = user_store.authenticate(passphrase)
+                session["user_id"] = auth_result["user_id"]
+                session["token"] = auth_result["token"]
+                return redirect(url_for("index"))
+        return render_template_string(LOGIN_TEMPLATE, errors=errors)
+
     @app.route("/", methods=["GET", "POST"])
-    def index() -> str:
+    def index() -> Any:
+        if not g.get("user"):
+            return redirect(url_for("auth"))
+
         errors: list[str] = []
         result_payload: Optional[Dict[str, Any]] = None
 
@@ -380,6 +607,8 @@ def create_app(
             "refine_passes": request.form.get("refine_passes", "0"),
             "safe_mode": safe_mode_enabled,
         }
+
+        user_id = session["user_id"]
 
         if request.method == "POST":
             target_framework = defaults["target_framework"].strip()
@@ -416,11 +645,22 @@ def create_app(
                 except ValueError:
                     errors.append("Refinement passes must be a non-negative integer.")
 
+            project_record: Optional[Dict[str, Any]] = None
+
             if not errors and uploaded:
                 filename = secure_filename(uploaded.filename)
                 suffix = Path(filename).suffix or ".zip"
+                project_record = user_store.create_project(
+                    user_id,
+                    name=Path(filename).stem,
+                    original_filename=uploaded.filename,
+                    target_framework=target_framework,
+                    target_language=target_lang,
+                )
                 temp_zip_path: Optional[Path] = None
                 try:
+                    user_output_root = web_output_root / user_id
+                    user_output_root.mkdir(parents=True, exist_ok=True)
                     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
                         uploaded.save(tmp_file)
                         temp_zip_path = Path(tmp_file.name)
@@ -431,15 +671,17 @@ def create_app(
                         src_lang=src_lang,
                         src_framework=src_framework,
                         reuse_cache=True,
-                        output_root=web_output_root,
+                        output_root=user_output_root,
                         llm=llm_service,
                         cache=cache_manager,
                         page_size=page_size_int,
                         refine_passes=refine_passes_int,
                         safe_mode=safe_mode_enabled,
                     )
+                    final_record = _finalise_success(user_id, project_record["id"], migration)
                     safe_mode_result = migration.get("safe_mode", safe_mode_enabled)
                     result_payload = {
+                        "project_id": final_record.get("id"),
                         "project_name": migration["project_name"],
                         "output_path": str(migration["target_path"]),
                         "detected_stack": migration["detected_stack"],
@@ -450,23 +692,103 @@ def create_app(
                         "token_usage": migration.get("token_usage", {}),
                         "cost_estimate": migration.get("cost_estimate", {}),
                         "safe_mode": safe_mode_result,
+                        "download_url": url_for("download_project", project_id=final_record.get("id")),
                     }
-                except Exception as exc:  # noqa: BLE001 - bubble error to UI and log stack
+                except Exception as exc:  # noqa: BLE001
                     app.logger.exception("Migration failed")
                     errors.append(str(exc))
+                    if project_record is not None:
+                        _finalise_failure(user_id, project_record["id"], str(exc))
                 finally:
                     if temp_zip_path is not None:
                         temp_zip_path.unlink(missing_ok=True)
+
+        pending_projects, completed_projects = _group_projects(user_id)
 
         return render_template_string(
             PAGE_TEMPLATE,
             errors=errors,
             result=result_payload,
             defaults=defaults,
+            pending_projects=pending_projects,
+            completed_projects=completed_projects,
+            user_id=user_id,
+            user_token=g.get("auth_token", ""),
         )
+
+    @app.route("/projects/<project_id>/download")
+    def download_project(project_id: str):
+        if not g.get("user"):
+            return redirect(url_for("auth"))
+        project = user_store.get_project(session["user_id"], project_id)
+        if not project or project.get("status") != "completed":
+            abort(404)
+        archive_path = project.get("archive_path")
+        if not archive_path or not Path(archive_path).exists():
+            abort(404)
+        download_name = project.get("download_name") or Path(archive_path).name
+        return send_file(archive_path, as_attachment=True, download_name=download_name)
+
+    @app.route("/api/auth", methods=["POST"])
+    def api_auth():
+        payload = request.get_json(silent=True) or {}
+        passphrase = (
+            (payload.get("passphrase") if isinstance(payload, dict) else None)
+            or request.form.get("passphrase")
+            or request.values.get("passphrase")
+        )
+        if not passphrase:
+            return ({"error": "passphrase is required"}, 400)
+        auth_result = user_store.authenticate(passphrase.strip())
+        return (
+            {
+                "user_id": auth_result["user_id"],
+                "token": auth_result["token"],
+                "created": auth_result["created"],
+            },
+            200,
+        )
+
+    @app.route("/api/projects", methods=["GET"])
+    def api_projects():
+        token = _extract_token(request)
+        user_id = user_store.resolve_token(token)
+        if not user_id:
+            return ({"error": "invalid or missing token"}, 401)
+        projects_payload = []
+        for project in user_store.list_projects(user_id):
+            entry = dict(project)
+            if entry.get("status") == "completed" and entry.get("archive_path"):
+                entry["download_url"] = url_for(
+                    "api_download_project",
+                    project_id=entry["id"],
+                    _external=True,
+                )
+            projects_payload.append(entry)
+        return ({"projects": projects_payload}, 200)
+
+    @app.route("/api/projects/<project_id>/download", methods=["GET"])
+    def api_download_project(project_id: str):
+        token = _extract_token(request)
+        user_id = user_store.resolve_token(token)
+        if not user_id:
+            return ({"error": "invalid or missing token"}, 401)
+        project = user_store.get_project(user_id, project_id)
+        if not project or project.get("status") != "completed":
+            return ({"error": "project not available"}, 404)
+        archive_path = project.get("archive_path")
+        if not archive_path or not Path(archive_path).exists():
+            return ({"error": "archive not found"}, 404)
+        download_name = project.get("download_name") or Path(archive_path).name
+        return send_file(archive_path, as_attachment=True, download_name=download_name)
 
     @app.route("/api/migrate", methods=["POST"])
     def api_migrate():
+        token = _extract_token(request)
+        user_id = user_store.resolve_token(token)
+        if not user_id:
+            return ({"error": "invalid or missing token"}, 401)
+
         uploaded = (
             request.files.get("archive")
             or request.files.get("file")
@@ -508,9 +830,19 @@ def create_app(
         if not target_framework:
             return ({"error": "target_framework is required."}, 400)
 
+        project_record = user_store.create_project(
+            user_id,
+            name=Path(uploaded.filename).stem,
+            original_filename=uploaded.filename,
+            target_framework=target_framework,
+            target_language=target_lang,
+        )
+
         suffix = Path(uploaded.filename).suffix or ".zip"
-        temp_path = None
+        temp_path: Optional[Path] = None
         try:
+            user_output_root = api_output_root / user_id
+            user_output_root.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
                 uploaded.save(tmp_file)
                 temp_path = Path(tmp_file.name)
@@ -522,19 +854,22 @@ def create_app(
                 src_lang=src_lang,
                 src_framework=src_framework,
                 reuse_cache=True,
-                output_root=web_output_root,
+                output_root=user_output_root,
                 llm=llm_service,
                 cache=cache_manager,
                 safe_mode=safe_mode_enabled,
             )
         except Exception as exc:  # noqa: BLE001
             app.logger.exception("API migration failed")
+            _finalise_failure(user_id, project_record["id"], str(exc))
             return ({"error": str(exc)}, 500)
         finally:
             if temp_path is not None:
                 temp_path.unlink(missing_ok=True)
 
+        final_record = _finalise_success(user_id, project_record["id"], migration)
         response = {
+            "project_id": final_record.get("id"),
             "project_name": migration["project_name"],
             "output_path": str(migration["target_path"]),
             "detected_stack": migration["detected_stack"],
@@ -545,8 +880,14 @@ def create_app(
             "token_usage": migration.get("token_usage", {}),
             "cost_estimate": migration.get("cost_estimate", {}),
             "safe_mode": migration.get("safe_mode", safe_mode_enabled),
+            "status": final_record.get("status"),
+            "download_url": url_for(
+                "api_download_project",
+                project_id=final_record.get("id"),
+                _external=True,
+            ) if final_record.get("archive_path") else None,
         }
-        return response, 200
+        return (response, 200)
 
     return app
 
