@@ -11,7 +11,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Sequence
 
 from analysis.compatibility_agent import CompatibilitySearchAgent
 from analysis.dependency_agent import DependencyAnalysisAgent
@@ -173,6 +173,41 @@ def _cost_configuration() -> Dict[str, Any]:
         "resource_time_left": time_remaining,
         "resource_note": note,
     }
+
+
+def _collect_project_stats(base_path: Path, sources: Sequence[str]) -> Dict[str, Any]:
+    stats: Dict[str, Any] = {
+        "total_files": len(sources),
+        "total_lines": 0,
+        "max_file_lines": 0,
+        "line_counts": {},
+    }
+
+    for rel_path in sources:
+        try:
+            path = (Path(base_path) / rel_path).resolve()
+            path.relative_to(Path(base_path).resolve())
+        except Exception:  # noqa: BLE001
+            continue
+        if not path.is_file():
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except Exception:  # noqa: BLE001
+            continue
+        count = len(lines)
+        stats["line_counts"][rel_path] = count
+        stats["total_lines"] += count
+        stats["max_file_lines"] = max(stats["max_file_lines"], count)
+
+    if stats["total_files"]:
+        stats["average_file_lines"] = int(
+            stats["total_lines"] / max(stats["total_files"], 1)
+        )
+    else:
+        stats["average_file_lines"] = 0
+
+    return stats
 
 
 def _stub_content(
@@ -382,6 +417,14 @@ def run_migration(
         plan = PlanningAgent().create_plan({}, classification.get("source", []))
         logging.info("Planning produced %d source artefacts", len(plan))
 
+        project_stats = _collect_project_stats(temp_dir, plan)
+        logging.info(
+            "Project statistics: files=%d total_lines=%d max_file_lines=%d",
+            project_stats.get("total_files", 0),
+            project_stats.get("total_lines", 0),
+            project_stats.get("max_file_lines", 0),
+        )
+
         project_name = Path(zip_path.stem).name.replace("-", "_") or "migrated_project"
         architecture_planner = ArchitecturePlanner(temp_dir, llm_service, cache_manager)
         architecture_map = architecture_planner.propose(
@@ -493,6 +536,7 @@ def run_migration(
                 page_size=page_size,
                 refine_passes=refine_passes,
                 safe_mode=safe_mode,
+                project_stats=project_stats,
             )
 
         logging.info(
@@ -553,6 +597,14 @@ def run_migration(
 
     logging.info("Migration completed for %s", zip_path)
 
+    pagination_report = {
+        "mode": "manual" if page_size is not None else "auto",
+        "requested_page_size": page_size,
+        "decisions": dict(src_migrator.pagination_log),
+        "project_stats": project_stats,
+        "auto_configuration": getattr(src_migrator, "auto_pagination", {}),
+    }
+
     return {
         "classification": classification,
         "detected_stack": detected_stack,
@@ -570,6 +622,7 @@ def run_migration(
         "token_usage": token_usage,
         "cost_estimate": cost_estimate,
         "safe_mode": safe_mode,
+        "pagination": pagination_report,
     }
 
 
@@ -650,6 +703,7 @@ def create_app(
             "scaffolding_blueprint": migration.get("scaffolding_blueprint"),
             "scaffolding_stubs": migration.get("scaffolding_stubs"),
             "compatibility": migration.get("compatibility"),
+            "pagination": migration.get("pagination"),
             "error": None,
         }
         record = user_store.update_project(user_id, project_id, **metadata) or metadata
@@ -873,7 +927,6 @@ def create_app(
             "target_lang": request.form.get("target_lang", "java"),
             "src_lang": request.form.get("src_lang", ""),
             "src_framework": request.form.get("src_framework", ""),
-            "page_size": request.form.get("page_size", ""),
             "refine_passes": request.form.get("refine_passes", "0"),
             "safe_mode": safe_mode_enabled,
         }
@@ -885,7 +938,7 @@ def create_app(
             target_lang = defaults["target_lang"].strip() or "java"
             src_lang = defaults["src_lang"].strip() or None
             src_framework = defaults["src_framework"].strip() or None
-            page_size_value = defaults["page_size"].strip()
+            page_size_value = (request.form.get("page_size", "")).strip()
             refine_passes_value = defaults["refine_passes"].strip()
             page_size_int: Optional[int] = None
             refine_passes_int = 0
@@ -903,8 +956,6 @@ def create_app(
                     page_size_int = int(page_size_value)
                     if page_size_int < 0:
                         raise ValueError
-                    if page_size_int == 0:
-                        page_size_int = None
                 except ValueError:
                     errors.append("Pagination size must be a non-negative integer.")
             if refine_passes_value:
@@ -1235,7 +1286,6 @@ def main() -> None:
 
     llm, cache = build_services()
     try:
-        page_size = args.page_size if args.page_size not in (None, 0) else None
         result = run_migration(
             args.zip_path,
             args.target_framework,
@@ -1245,7 +1295,7 @@ def main() -> None:
             reuse_cache=args.reuse_cache,
             llm=llm,
             cache=cache,
-            page_size=page_size,
+            page_size=args.page_size,
             refine_passes=args.refine_passes,
             safe_mode=args.safe_mode,
         )
@@ -1281,6 +1331,11 @@ def main() -> None:
         print_section("Consumo Token", json.dumps(result["token_usage"], indent=2))
     if result.get("cost_estimate"):
         print_section("Stima Costi H100", json.dumps(result["cost_estimate"], indent=2))
+    if result.get("pagination"):
+        print_section(
+            "Strategia di Paginazione",
+            json.dumps(result["pagination"], indent=2, ensure_ascii=False),
+        )
 
 
 if __name__ == "__main__":

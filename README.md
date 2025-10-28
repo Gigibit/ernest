@@ -16,9 +16,10 @@ available when downloading models.
 ## Paginated migrations and iterative refinement
 
 Large projects can be migrated in multiple passes to keep LLM prompts within a
-safe context window.  Use the new pagination and refinement controls to split
-each source artefact into smaller "pages" and optionally polish every page with
-extra model calls.
+safe context window.  By default the orchestrator analyses both the project and
+per-file size to choose an appropriate pagination strategy, then optionally
+polishes every page with additional model calls when refinement passes are
+enabled.
 
 ### CLI
 
@@ -27,16 +28,34 @@ python christophe.py your_project.zip --target-framework "modern service stack" 
   --page-size 5 --refine-passes 1
 ```
 
-`--page-size` defines how many source chunks are grouped per page.  Setting it
-to `0` (default) disables pagination.  `--refine-passes` runs additional
-polishing rounds for each page to remove artefacts left by the first
+`--page-size` overrides the automatic pagination and defines how many source
+chunks are grouped per page.  Setting it to `0` forces a single-pass migration,
+while omitting the flag keeps the automatic heuristics.  `--refine-passes` runs
+additional polishing rounds for each page to remove artefacts left by the first
 translation.
 
 ### Web UI
 
-The Flask interface now exposes *Pagination size* and *Refinement passes*
-inputs next to the file uploader, so you can experiment with progressive
-refinements directly from the browser.
+The Flask interface now exposes only the *Refinement passes* control; pagination
+is determined automatically unless you override it via environment variables or
+the API/CLI.
+
+### Environment overrides
+
+Automatic pagination thresholds honour the following optional environment
+variables when present:
+
+* `CHRISTOPHE_AUTO_PAGE_SMALL_LINES`, `..._MEDIUM_LINES`, `..._LARGE_LINES`,
+  `..._HUGE_LINES` – control the line-count breakpoints used to switch between
+  single-pass and multi-pass migrations.
+* `CHRISTOPHE_AUTO_PAGE_MEDIUM_CHUNKS`, `..._LARGE_CHUNKS`,
+  `..._HUGE_CHUNKS`, `..._MASSIVE_CHUNKS` – define how many chunks should be
+  grouped per page for each size bracket.
+* `CHRISTOPHE_AUTO_PAGE_PROJECT_FILES`, `..._PROJECT_LINES`, and
+  `..._PROJECT_CHUNKS` – adjust when large projects trigger more conservative
+  chunk sizes.
+
+Unset variables fall back to sensible defaults tuned for 7B class models.
 
 ## Safe mode fallback guardrails
 

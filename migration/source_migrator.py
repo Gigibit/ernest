@@ -4,10 +4,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Dict, Iterable, Mapping, MutableMapping, Sequence
+from typing import Any, Dict, Iterable, Mapping, MutableMapping, Sequence
 
 from .strategies import DEFAULT_STRATEGIES, TranslationStrategy
 
@@ -21,6 +22,8 @@ class SourceMigrator:
         cache,
         recovery,
         strategies: Mapping[str, TranslationStrategy] | None = None,
+        *,
+        auto_pagination: Mapping[str, int] | None = None,
     ) -> None:
         self.llm = llm
         self.cache = cache
@@ -28,6 +31,10 @@ class SourceMigrator:
         self.strategies: Dict[str, TranslationStrategy] = dict(
             strategies or DEFAULT_STRATEGIES
         )
+        self.auto_pagination: Dict[str, int] = dict(
+            auto_pagination or self._load_auto_config()
+        )
+        self.pagination_log: Dict[str, Dict[str, Any]] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -96,9 +103,18 @@ class SourceMigrator:
                 )
                 return dst
 
+            project_stats = context.pop("project_stats", None)
+            resolved_page_size = self._resolve_page_size(
+                strategy,
+                src,
+                chunks,
+                page_size,
+                project_stats,
+            )
+
             translated_parts = []
             for page_number, (start, end) in enumerate(
-                self._paginate_indices(len(chunks), page_size)
+                self._paginate_indices(len(chunks), resolved_page_size)
             ):
                 logging.info(
                     "Translating page %d (%d-%d) for %s", page_number + 1, start, end, src
@@ -164,6 +180,7 @@ class SourceMigrator:
         page_size: int | None = None,
         refine_passes: int = 0,
         safe_mode: bool = True,
+        project_stats: Mapping[str, Any] | None = None,
     ) -> Path:
         return self.translate(
             "legacy_backend_to_services",
@@ -178,6 +195,7 @@ class SourceMigrator:
             page_size=page_size,
             refine_passes=refine_passes,
             safe_mode=safe_mode,
+            project_stats=project_stats,
         )
 
     def translate_dynamic_web_module(
@@ -189,6 +207,7 @@ class SourceMigrator:
         page_size: int | None = None,
         refine_passes: int = 0,
         safe_mode: bool = True,
+        project_stats: Mapping[str, Any] | None = None,
     ) -> Path:
         return self.translate(
             "dynamic_web_to_structured_backend",
@@ -198,6 +217,7 @@ class SourceMigrator:
             page_size=page_size,
             refine_passes=refine_passes,
             safe_mode=safe_mode,
+            project_stats=project_stats,
         )
 
     def translate_client_component(
@@ -209,6 +229,7 @@ class SourceMigrator:
         page_size: int | None = None,
         refine_passes: int = 0,
         safe_mode: bool = True,
+        project_stats: Mapping[str, Any] | None = None,
     ) -> Path:
         return self.translate(
             "legacy_frontend_to_component_ui",
@@ -218,6 +239,7 @@ class SourceMigrator:
             page_size=page_size,
             refine_passes=refine_passes,
             safe_mode=safe_mode,
+            project_stats=project_stats,
         )
 
     def translate_enterprise_core(
@@ -230,6 +252,7 @@ class SourceMigrator:
         page_size: int | None = None,
         refine_passes: int = 0,
         safe_mode: bool = True,
+        project_stats: Mapping[str, Any] | None = None,
     ) -> Path:
         return self.translate(
             "enterprise_core_to_cloud",
@@ -240,6 +263,7 @@ class SourceMigrator:
             page_size=page_size,
             refine_passes=refine_passes,
             safe_mode=safe_mode,
+            project_stats=project_stats,
         )
 
     # Internal helpers -----------------------------------------------------
@@ -410,6 +434,9 @@ class SourceMigrator:
         if self._looks_like_passthrough(chunk, translated):
             return True
 
+        if self._lacks_substantive_code(translated):
+            return True
+
         lowered = translated.lower()
         for trigger in strategy.fallback_triggers:
             if trigger and trigger.lower() in lowered:
@@ -445,6 +472,34 @@ class SourceMigrator:
         return ratio >= 0.85
 
     @staticmethod
+    def _lacks_substantive_code(text: str) -> bool:
+        """Detect outputs that only contain imports, packages or comments."""
+
+        substantive = 0
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            lowered = line.lower()
+            if lowered.startswith("//") or lowered.startswith("#"):
+                continue
+            if lowered.startswith("/*") or lowered.startswith("* "):
+                continue
+            if lowered.startswith("package ") or lowered.startswith("namespace "):
+                continue
+            if lowered.startswith("import "):
+                continue
+            if lowered.startswith("using "):
+                continue
+            if lowered.startswith("from ") and " import " in lowered:
+                continue
+            substantive += 1
+            if substantive >= 1:
+                return False
+
+        return True
+
+    @staticmethod
     def _clean_generation(text: str) -> str:
         """Normalise LLM output by removing fences and boilerplate."""
 
@@ -478,4 +533,204 @@ class SourceMigrator:
             (start, min(start + page_size, total))
             for start in range(0, total, page_size)
         ]
+
+    # ------------------------------------------------------------------
+    # Pagination helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _load_auto_config() -> Dict[str, int]:
+        env = os.environ
+
+        def _positive_int(name: str, default: int) -> int:
+            raw = env.get(name)
+            if raw is None:
+                return default
+            try:
+                value = int(raw)
+            except ValueError:
+                logging.warning(
+                    "Invalid value for %s=%s; falling back to %d", name, raw, default
+                )
+                return default
+            if value <= 0:
+                logging.warning(
+                    "%s must be > 0, received %d; using %d", name, value, default
+                )
+                return default
+            return value
+
+        return {
+            "small_line_threshold": _positive_int(
+                "CHRISTOPHE_AUTO_PAGE_SMALL_LINES", 600
+            ),
+            "medium_line_threshold": _positive_int(
+                "CHRISTOPHE_AUTO_PAGE_MEDIUM_LINES", 1500
+            ),
+            "large_line_threshold": _positive_int(
+                "CHRISTOPHE_AUTO_PAGE_LARGE_LINES", 3500
+            ),
+            "huge_line_threshold": _positive_int(
+                "CHRISTOPHE_AUTO_PAGE_HUGE_LINES", 6000
+            ),
+            "medium_page_chunks": _positive_int(
+                "CHRISTOPHE_AUTO_PAGE_MEDIUM_CHUNKS", 4
+            ),
+            "large_page_chunks": _positive_int(
+                "CHRISTOPHE_AUTO_PAGE_LARGE_CHUNKS", 6
+            ),
+            "huge_page_chunks": _positive_int(
+                "CHRISTOPHE_AUTO_PAGE_HUGE_CHUNKS", 8
+            ),
+            "massive_page_chunks": _positive_int(
+                "CHRISTOPHE_AUTO_PAGE_MASSIVE_CHUNKS", 10
+            ),
+            "project_large_file_count": _positive_int(
+                "CHRISTOPHE_AUTO_PAGE_PROJECT_FILES", 40
+            ),
+            "project_large_total_lines": _positive_int(
+                "CHRISTOPHE_AUTO_PAGE_PROJECT_LINES", 60000
+            ),
+            "project_large_page_chunks": _positive_int(
+                "CHRISTOPHE_AUTO_PAGE_PROJECT_CHUNKS", 3
+            ),
+        }
+
+    @staticmethod
+    def _count_lines(chunks: Sequence[str]) -> int:
+        if not chunks:
+            return 0
+        return sum(len(chunk.splitlines()) for chunk in chunks)
+
+    def _resolve_page_size(
+        self,
+        strategy: TranslationStrategy,
+        src: Path,
+        chunks: Sequence[str],
+        explicit: int | None,
+        project_stats: Mapping[str, Any] | None,
+    ) -> int | None:
+        total_chunks = len(chunks)
+        line_count = self._count_lines(chunks)
+
+        if total_chunks <= 1:
+            self.pagination_log[str(src)] = {
+                "mode": "manual" if explicit is not None else "auto",
+                "requested_page_size": explicit,
+                "resolved_page_size": None,
+                "total_chunks": total_chunks,
+                "line_count": line_count,
+                "chunk_size": strategy.chunk_size,
+            }
+            if explicit:
+                logging.info(
+                    "Pagination override ignored for %s; only one chunk available",
+                    src,
+                )
+            return None
+
+        def _limit(value: int | None) -> int | None:
+            if value is None:
+                return None
+            if value <= 0:
+                return None
+            bounded = max(1, min(value, total_chunks))
+            if bounded >= total_chunks:
+                return None
+            return bounded
+
+        if explicit is not None:
+            resolved = _limit(explicit)
+            if resolved is None:
+                logging.info(
+                    "Manual pagination for %s results in a single pass (chunks=%d)",
+                    src,
+                    total_chunks,
+                )
+            else:
+                logging.info(
+                    "Manual pagination for %s: %d chunks per page (chunks=%d)",
+                    src,
+                    resolved,
+                    total_chunks,
+                )
+        else:
+            resolved = self._automatic_page_size(total_chunks, line_count, project_stats)
+            if resolved is None:
+                logging.info(
+                    "Auto pagination for %s: single pass (chunks=%d, lines=%d)",
+                    src,
+                    total_chunks,
+                    line_count,
+                )
+            else:
+                logging.info(
+                    "Auto pagination for %s: %d chunks per page (chunks=%d, lines=%d)",
+                    src,
+                    resolved,
+                    total_chunks,
+                    line_count,
+                )
+
+        decision = {
+            "mode": "manual" if explicit is not None else "auto",
+            "requested_page_size": explicit,
+            "resolved_page_size": resolved,
+            "total_chunks": total_chunks,
+            "line_count": line_count,
+            "chunk_size": strategy.chunk_size,
+        }
+        if project_stats:
+            decision.update(
+                {
+                    "project_total_files": project_stats.get("total_files"),
+                    "project_total_lines": project_stats.get("total_lines"),
+                }
+            )
+        self.pagination_log[str(src)] = decision
+        return resolved
+
+    def _automatic_page_size(
+        self,
+        total_chunks: int,
+        line_count: int,
+        project_stats: Mapping[str, Any] | None,
+    ) -> int | None:
+        config = self.auto_pagination
+
+        thresholds = [
+            (config["small_line_threshold"], None),
+            (config["medium_line_threshold"], config["medium_page_chunks"]),
+            (config["large_line_threshold"], config["large_page_chunks"]),
+            (config["huge_line_threshold"], config["huge_page_chunks"]),
+        ]
+
+        resolved: int | None = None
+        for threshold, chunk_target in thresholds:
+            if line_count <= threshold:
+                resolved = chunk_target
+                break
+
+        if resolved is None:
+            resolved = config["massive_page_chunks"]
+
+        if resolved is None:
+            return None
+
+        resolved = max(1, min(resolved, total_chunks))
+        if resolved >= total_chunks:
+            return None
+
+        if project_stats:
+            total_files = project_stats.get("total_files", 0) or 0
+            total_lines = project_stats.get("total_lines", 0) or 0
+            if (
+                total_files >= config["project_large_file_count"]
+                or total_lines >= config["project_large_total_lines"]
+            ):
+                adjusted = max(1, min(config["project_large_page_chunks"], resolved))
+                resolved = max(1, min(adjusted, resolved))
+                if resolved >= total_chunks:
+                    return None
+
+        return resolved
 

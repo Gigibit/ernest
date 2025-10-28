@@ -395,7 +395,7 @@
         <header class="top">
             <div>
                 <h1>Christophe Migration Portal</h1>
-                <p class="subtitle">Upload a ZIP archive and orchestrate safe, paginated migrations.</p>
+                <p class="subtitle">Upload a ZIP archive and orchestrate safe migrations; pagination is now tuned automatically from project size unless overridden via configuration.</p>
             </div>
             <div class="account">
                 <div>Workspace <code>{{ user_id }}</code></div>
@@ -435,10 +435,6 @@
             <div>
                 <label for="src_framework">Source framework (optional)</label>
                 <input id="src_framework" name="src_framework" type="text" value="{{ defaults.src_framework }}" placeholder="e.g. on-prem enterprise platform">
-            </div>
-            <div>
-                <label for="page_size">Pagination size (chunks per pass)</label>
-                <input id="page_size" name="page_size" type="number" min="0" step="1" value="{{ defaults.page_size }}" placeholder="e.g. 5">
             </div>
             <div>
                 <label for="refine_passes">
@@ -853,6 +849,10 @@
                 if (project.compatibility) {
                     details.appendChild(buildDetailHeading('Alternative suggestions'));
                     details.appendChild(buildDetailBlock(project.compatibility));
+                }
+                if (project.pagination) {
+                    details.appendChild(buildDetailHeading('Pagination strategy'));
+                    details.appendChild(buildDetailBlock(project.pagination));
                 }
                 if (project.error) {
                     details.appendChild(buildDetailHeading('Last error'));

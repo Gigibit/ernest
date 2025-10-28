@@ -176,7 +176,9 @@ DEFAULT_STRATEGIES: Dict[str, TranslationStrategy] = {
         instructions=(
             "Preserva la logica di dominio, esplicita gli strati applicativi e "
             "sfrutta le costruzioni offerte dal linguaggio di destinazione per "
-            "ottenere codice pulito e compilabile."
+            "ottenere codice pulito e compilabile. Riproduci classi, funzioni e "
+            "gestione errori in modo completo: non limitarti a dichiarare import "
+            "o segnaposto."
         ),
         target_language="production-ready service code",
         profile="translate",
@@ -198,8 +200,9 @@ DEFAULT_STRATEGIES: Dict[str, TranslationStrategy] = {
         refine_max_new_tokens=3072,
         fallback_instructions=(
             "Se il risultato include ancora sintassi o parole chiave del sistema originale, "
-            "riscrivi completamente il blocco nel linguaggio di destinazione. Elimina "
-            "qualsiasi marcatore di conflitto e fornisci solo codice pronto alla compilazione."
+            "oppure restituisce solo import/commenti/stub, riscrivi completamente il blocco "
+            "nel linguaggio di destinazione. Elimina qualsiasi marcatore di conflitto e "
+            "fornisci esclusivamente codice completo e compilabile."
         ),
         fallback_max_new_tokens=4096,
         fallback_triggers=(
@@ -217,7 +220,9 @@ DEFAULT_STRATEGIES: Dict[str, TranslationStrategy] = {
         target_descriptor="un back-end tipizzato con architettura modulare e API esposte",
         instructions=(
             "Mappa modelli e servizi in entità ben tipizzate, trasforma viste "
-            "in API pulite e cura gestione errori e sicurezza con pattern moderni."
+            "in API pulite e cura gestione errori e sicurezza con pattern moderni. "
+            "Genera classi, DTO e servizi completamente implementati, evitando output "
+            "che contenga solo import o scheletri privi di logica."
         ),
         target_language="typed back-end code",
         profile="translate",
@@ -239,7 +244,8 @@ DEFAULT_STRATEGIES: Dict[str, TranslationStrategy] = {
         fallback_instructions=(
             "Assicurati che ogni handler, vista o modello dinamico venga convertito in "
             "controller tipizzati, DTO e servizi contemporanei. Non lasciare frammenti del "
-            "framework sorgente e non restituire commenti descrittivi."
+            "framework sorgente e non restituire commenti descrittivi o soli import; "
+            "ricostruisci classi e metodi con logica funzionante."
         ),
         fallback_max_new_tokens=3072,
         fallback_triggers=(
@@ -255,7 +261,9 @@ DEFAULT_STRATEGIES: Dict[str, TranslationStrategy] = {
         target_descriptor="una libreria component-based con gestione dello stato dichiarativa",
         instructions=(
             "Scomponi le responsabilità in componenti, sostituisci binding "
-            "impliciti con stato esplicito e applica tipizzazione coerente."
+            "impliciti con stato esplicito e applica tipizzazione coerente. "
+            "Ogni componente deve risultare completo, con stato, proprietà ed effetti "
+            "implementati, mai ridotto a soli import o placeholder."
         ),
         target_language="component-driven front-end code",
         profile="translate",
@@ -277,7 +285,8 @@ DEFAULT_STRATEGIES: Dict[str, TranslationStrategy] = {
         fallback_instructions=(
             "Converte qualsiasi direttiva o template legacy in componenti dichiarativi "
             "con gestione dello stato esplicita. Non includere testo descrittivo, "
-            "markup duplicato o commenti discorsivi."
+            "markup duplicato o commenti discorsivi: genera componenti completi con "
+            "logica e stato pronti all'uso."
         ),
         fallback_max_new_tokens=2048,
         fallback_triggers=(
@@ -293,7 +302,9 @@ DEFAULT_STRATEGIES: Dict[str, TranslationStrategy] = {
         target_descriptor="una piattaforma cloud-native modulare con estensioni pulite",
         instructions=(
             "Modernizza sintassi, separa personalizzazioni da core standard e "
-            "indica eventuali adattatori o servizi esterni necessari."
+            "indica eventuali adattatori o servizi esterni necessari. Genera moduli "
+            "completi con classi e funzioni pienamente implementate, mai solo import "
+            "o commenti."
         ),
         target_language="enterprise core code aligned with the target platform",
         profile="translate",
@@ -311,8 +322,9 @@ DEFAULT_STRATEGIES: Dict[str, TranslationStrategy] = {
         refine_max_new_tokens=2560,
         fallback_instructions=(
             "Se l'output conserva termini, commenti o chiamate proprietarie del sistema "
-            "legacy, riscrivi la sezione nel linguaggio target adottando pattern cloud-native. "
-            "Non lasciare placeholder o TODO."
+            "legacy, o se manca di classi/metodi implementati, riscrivi la sezione nel "
+            "linguaggio target adottando pattern cloud-native. Non lasciare placeholder "
+            "o TODO e restituisci codice pronto alla compilazione."
         ),
         fallback_max_new_tokens=3072,
         fallback_triggers=(
