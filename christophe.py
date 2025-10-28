@@ -124,10 +124,23 @@ def run_migration(
 
     with tempfile.TemporaryDirectory(prefix="christophe_") as tmp:
         temp_dir = Path(tmp)
+        logging.info("Unpacking archive %s into %s", zip_path, temp_dir)
         secure_unzip(zip_path, temp_dir)
 
+        logging.info("Running heuristic classification for %s", temp_dir)
+        
         heuristic = HeuristicAnalysisAgent(str(temp_dir), llm_service, cache_manager)
         classification = heuristic.classify_files()
+
+        source_files = classification.get("source", []) or []
+        resource_files = classification.get("resource", []) or []
+        other_files = classification.get("other", []) or []
+        logging.info(
+            "Classification completed: %d source, %d resource, %d other files",
+            len(source_files),
+            len(resource_files),
+            len(other_files),
+        )
 
         detected_stack = (
             {"language": src_lang, "framework": src_framework}
@@ -136,21 +149,34 @@ def run_migration(
         )
         if not detected_stack:
             raise RuntimeError("Impossibile determinare lo stack sorgente.")
+        logging.info(
+            "Detected source stack: language=%s framework=%s",
+            detected_stack.get("language"),
+            detected_stack.get("framework"),
+        )
 
         graph = SemanticGraphBuilder()
         graph.add_nodes(classification.get("source", []))
         plan = PlanningAgent().create_plan({}, classification.get("source", []))
+        logging.info("Planning produced %d source artefacts", len(plan))
 
         scaffold_agent = ScaffoldingAgent(llm_service, cache_manager)
         project_name = Path(zip_path.stem).name.replace("-", "_") or "migrated_project"
         target_path = scaffold_agent.generate(
             output_root, project_name, target_framework, target_lang
         )
+        logging.info("Scaffold generated at %s", target_path)
 
         dependency_agent = DependencyAnalysisAgent(temp_dir, llm_service, cache_manager)
         dependency_snapshot = dependency_agent.extract_dependencies(
             target_language=target_lang,
             target_framework=target_framework,
+        )
+        snapshot_dependencies = dependency_snapshot.get("dependencies", []) or []
+        logging.info(
+            "Dependency snapshot captured %d dependencies across %d manifests",
+            len(snapshot_dependencies),
+            len(dependency_snapshot.get("manifests", []) or []),
         )
 
         recovery_path = target_path / "migration_state.json"
@@ -168,14 +194,28 @@ def run_migration(
             target_framework=target_framework,
             perform_downloads=True,
         )
+        logging.info(
+            "Dependency resolver produced %d planned entries and %d downloads",
+            len(dependency_resolution.get("plan", {}).get("dependencies", []) or []),
+            len(dependency_resolution.get("downloads", []) or []),
+        )
 
-        for src in plan:
+        logging.info("Beginning source translation for %d files", len(plan))
+        for index, src in enumerate(plan, start=1):
             source_file = temp_dir / src
             if not source_file.exists():
                 recovery.mark_skipped(src)
+                logging.warning("Source file %s missing from archive; marked skipped", src)
                 continue
 
             destination = target_path / "src" / Path(src).with_suffix(".java").name
+            logging.info(
+                "[%d/%d] Translating source artefact %s -> %s",
+                index,
+                len(plan),
+                source_file,
+                destination,
+            )
             src_migrator.translate_legacy_backend(
                 source_file,
                 destination,
@@ -184,10 +224,17 @@ def run_migration(
                 safe_mode=safe_mode,
             )
 
+        logging.info(
+            "Source translation complete; processing %d resource files",
+            len(resource_files),
+        )
         for res in classification.get("resource", []):
             resource_path = temp_dir / res
             if resource_path.exists():
+                logging.info("Adapting resource %s", resource_path)
                 res_migrator.process(resource_path, target_path / "resources")
+            else:
+                logging.warning("Resource file %s missing from archive; skipping", res)
 
     token_usage = (
         llm_service.get_usage_summary()
@@ -195,6 +242,11 @@ def run_migration(
         else {}
     )
     cost_estimate = estimate_h100_receipt(token_usage) if token_usage else {}
+
+    if token_usage:
+        logging.info("Token usage summary: %s", token_usage)
+    if cost_estimate:
+        logging.info("Estimated compute receipt: %s", cost_estimate)
 
     if close_cache:
         cache_manager.close()

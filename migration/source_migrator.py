@@ -73,7 +73,16 @@ class SourceMigrator:
         llm_overrides.setdefault("max_new_tokens", strategy.max_new_tokens)
 
         try:
+            logging.info(
+                "Preparing translation of %s with strategy %s", src, strategy.name
+            )
             chunks = list(self._chunk_source(src, strategy.chunk_size))
+            logging.info(
+                "Chunked %s into %d segments (size=%d)",
+                src,
+                len(chunks),
+                strategy.chunk_size,
+            )
             if not chunks:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 dst.write_text("", encoding="utf-8")
@@ -91,6 +100,9 @@ class SourceMigrator:
             for page_number, (start, end) in enumerate(
                 self._paginate_indices(len(chunks), page_size)
             ):
+                logging.info(
+                    "Translating page %d (%d-%d) for %s", page_number + 1, start, end, src
+                )
                 page_translations = self._translate_page(
                     strategy,
                     chunks,
@@ -237,6 +249,12 @@ class SourceMigrator:
         translated_parts: list[str] = []
         for idx in range(start, end):
             chunk = chunks[idx]
+            logging.debug(
+                "Issuing translation prompt for %s chunk %d (fallback=%s)",
+                strategy.name,
+                idx,
+                False,
+            )
             translated = self._issue_prompt(
                 strategy,
                 chunk,
@@ -259,6 +277,10 @@ class SourceMigrator:
                     context,
                     llm_overrides,
                     fallback=True,
+                )
+            else:
+                logging.debug(
+                    "Chunk %d translated successfully without fallback", idx
                 )
 
             translated_parts.append(translated)
@@ -283,12 +305,22 @@ class SourceMigrator:
         )
 
         for iteration in range(passes):
+            logging.info(
+                "Refinement iteration %d/%d for page %d using %s",
+                iteration + 1,
+                passes,
+                page_number + 1,
+                strategy.name,
+            )
             prompt = strategy.build_refinement_prompt(
                 current, page_number, context, iteration
             )
             cache_key = self.llm.prompt_hash(profile, prompt)
             cached = self.cache.get(cache_key)
             if cached is not None:
+                logging.debug(
+                    "Using cached refinement for page %d iteration %d", page_number + 1, iteration
+                )
                 current = self._clean_generation(cached)
                 continue
 
@@ -322,8 +354,21 @@ class SourceMigrator:
         cache_key = self.llm.prompt_hash(profile, prompt)
         cached = self.cache.get(cache_key)
         if cached is not None:
+            logging.debug(
+                "Using cached translation for %s chunk %d (fallback=%s)",
+                strategy.name,
+                chunk_index,
+                fallback,
+            )
             return self._clean_generation(cached)
 
+        logging.debug(
+            "Invoking LLM profile %s for %s chunk %d (fallback=%s)",
+            profile,
+            strategy.name,
+            chunk_index,
+            fallback,
+        )
         response = self.llm.invoke(profile, prompt, **overrides)
         cleaned = self._clean_generation(response)
         self.cache.set(cache_key, cleaned)

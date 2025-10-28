@@ -25,11 +25,19 @@ class HeuristicAnalysisAgent:
                     continue
                 files.append(str(rel))
         files.sort()
+        logging.info(
+            "Heuristic gather discovered %d files in %s", len(files), self.project_path
+        )
         return files
 
     def classify_files(self, sample_count: int = 50) -> Dict[str, List[str]]:
         all_files = self.gather_files()
         sample = all_files[:sample_count]
+        logging.info(
+            "Classifying %d files (sample size %d) for heuristic analysis",
+            len(all_files),
+            len(sample),
+        )
         context = "\n".join(f"### {f}\n{read_head(self.project_path / f, max_chars=2000)}" for f in sample)
         prompt = textwrap.dedent(f"""
         You are a project file classifier.
@@ -48,9 +56,15 @@ class HeuristicAnalysisAgent:
         if cached:
             logging.info("Loaded classification from cache")
             return cached
+        logging.info("Requesting classification from LLM")
         resp = self.llm.invoke('classify', prompt, max_new_tokens=512)
         try:
             obj = self._extract_json(resp)
+            logging.info(
+                "Classifier identified %d source and %d resource files",
+                len(obj.get("source", []) or []),
+                len(obj.get("resource", []) or []),
+            )
         except ValueError:
             logging.warning("Classifier returned malformed payload, using fallback heuristics")
             obj = self._fallback_classification(all_files)
@@ -81,9 +95,15 @@ class HeuristicAnalysisAgent:
         if cached:
             logging.info("Loaded stack detection from cache")
             return cached
+        logging.info("Requesting stack detection from LLM")
         resp = self.llm.invoke('analyze', prompt, max_new_tokens=200)
         try:
             obj = self._extract_json(resp)
+            logging.info(
+                "Stack detection result: language=%s framework=%s",
+                obj.get("language"),
+                obj.get("framework"),
+            )
         except ValueError:
             logging.warning("Stack detector returned malformed payload, defaulting to null stack")
             obj = {"language": None, "framework": None}

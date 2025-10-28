@@ -42,6 +42,12 @@ class DependencyResolver:
     ) -> Dict[str, Any]:
         """Plan and optionally download the project's dependencies."""
 
+        logging.info(
+            "Resolving %d dependencies for %s/%s",
+            len(dependency_snapshot.get("dependencies", []) or []),
+            target_language,
+            target_framework,
+        )
         plan = self._build_plan(
             dependency_snapshot,
             target_language=target_language,
@@ -123,11 +129,17 @@ class DependencyResolver:
         cache_key = self.llm.prompt_hash("dependency", prompt)
         cached = self.cache.get(cache_key)
         if cached is not None:
+            logging.info("Loaded dependency plan from cache (%d entries)", len(cached.get("dependencies", []) or []))
             return cached
 
+        logging.info("Requesting dependency plan from LLM")
         response = self.llm.invoke("dependency", prompt, max_new_tokens=1200)
         plan = self._extract_json(response)
         self.cache.set(cache_key, plan)
+        logging.info(
+            "Dependency plan generated with %d entries",
+            len(plan.get("dependencies", []) or []),
+        )
         return plan
 
     def _run_wget(self, plan: Mapping[str, Any]) -> List[Dict[str, Any]]:
@@ -136,6 +148,7 @@ class DependencyResolver:
         if not isinstance(dependencies, list):
             return downloads
 
+        logging.info("Executing download plan for %d dependencies", len(dependencies))
         for item in dependencies:
             if not isinstance(item, Mapping):
                 continue
@@ -201,6 +214,7 @@ class DependencyResolver:
                         "output_path": str(output_path),
                     }
                 )
+        logging.info("Completed dependency downloads: %d attempted", len(downloads))
         return downloads
 
     @staticmethod

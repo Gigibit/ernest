@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import logging
 import re
 import shutil
 from typing import Dict, Mapping
@@ -62,6 +63,7 @@ class ResourceMigrator:
         ext = src.suffix.lower()
 
         if ext in BIN_EXT:
+            logging.info("Copying binary resource %s -> %s", src, target)
             shutil.copy(src, target)
             return target
 
@@ -73,8 +75,10 @@ class ResourceMigrator:
         if cached is not None:
             cleaned = self._clean_generation(cached)
             target.write_text(cleaned, encoding="utf-8")
+            logging.info("Resource %s adapted from cache", src)
             return target
 
+        logging.info("Adapting resource %s with profile %s", src, profile)
         out = self.llm.invoke("adapt", prompt, max_new_tokens=1024)
         cleaned = self._clean_generation(out)
         self.cache.set(cache_key, cleaned)
