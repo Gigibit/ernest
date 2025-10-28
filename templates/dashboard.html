@@ -333,22 +333,6 @@
 
         .empty { color: #64748b; font-style: italic; }
 
-        .result {
-            background: #eef2ff;
-            color: #1e1b4b;
-            padding: 20px 24px;
-            border-radius: 12px;
-            margin-top: 32px;
-        }
-
-        .result pre {
-            background: rgba(15, 23, 42, 0.85);
-            color: #e2e8f0;
-            padding: 16px;
-            border-radius: 10px;
-            overflow-x: auto;
-        }
-
         footer { margin-top: 48px; text-align: center; color: #64748b; font-size: 14px; }
 
         @media (max-width: 720px) {
@@ -483,6 +467,12 @@
                             <pre>{{ project.architecture | tojson(indent=2) }}</pre>
                         </details>
                         {% endif %}
+                        {% if project.compatibility %}
+                        <details class="detail-block">
+                            <summary>Alternative suggestions</summary>
+                            <pre>{{ project.compatibility | tojson(indent=2) }}</pre>
+                        </details>
+                        {% endif %}
                         {% if project.error %}
                         <div class="detail-block" role="alert">{{ project.error }}</div>
                         {% endif %}
@@ -497,43 +487,87 @@
             <p class="empty" id="completed-empty" {% if completed_projects %}style="display:none;"{% endif %}>No completed migrations yet.</p>
         </section>
         {% if result %}
-        <div class="result">
+        {% set result_status = (result.status or 'completed')|lower %}
+        {% set result_category = 'failed' if result_status in ['failed', 'error', 'ko'] else ('completed' if result_status == 'completed' else 'pending') %}
+        <section class="projects-section">
             <h2>Latest migration</h2>
-            <p><strong>Project:</strong> {{ result.project_name }}</p>
-            <p><strong>Output directory:</strong> {{ result.output_path }}</p>
-            {% if result.download_url %}<p><strong>Archive:</strong> <a href="{{ result.download_url }}">Download</a></p>{% endif %}
-            <p><strong>Detected stack:</strong></p>
-            <pre>{{ result.detected_stack | tojson(indent=2) }}</pre>
-            <p><strong>Safe mode:</strong> {{ 'enabled' if result.safe_mode else 'disabled' }}</p>
-            {% if result.architecture %}
-            <p><strong>Architecture mapping:</strong></p>
-            <pre>{{ result.architecture | tojson(indent=2) }}</pre>
-            {% endif %}
-            <p><strong>Migration plan:</strong></p>
-            <ul>
-            {% for step in result.plan %}
-                <li>{{ step }}</li>
-            {% endfor %}
-            </ul>
-            <p><strong>Classification summary:</strong></p>
-            <pre>{{ result.classification | tojson(indent=2) }}</pre>
-            {% if result.dependencies %}
-            <p><strong>Dependency manifests:</strong></p>
-            <pre>{{ result.dependencies | tojson(indent=2) }}</pre>
-            {% endif %}
-            {% if result.dependency_resolution %}
-            <p><strong>Dependency handling:</strong></p>
-            <pre>{{ result.dependency_resolution | tojson(indent=2) }}</pre>
-            {% endif %}
-            {% if result.token_usage %}
-            <p><strong>Token usage:</strong></p>
-            <pre>{{ result.token_usage | tojson(indent=2) }}</pre>
-            {% endif %}
-            {% if result.cost_estimate %}
-            <p><strong>H100 cost estimate:</strong></p>
-            <pre>{{ result.cost_estimate | tojson(indent=2) }}</pre>
-            {% endif %}
-        </div>
+            <div class="projects-list">
+                <div class="project-row status-{{ result_category }}">
+                    <button type="button" class="project-header" aria-expanded="false">
+                        <div class="project-summary">
+                            <span class="status-dot status-{{ result_category }}" aria-hidden="true"></span>
+                            <span class="project-title">{{ result.project_name or 'Latest migration' }}</span>
+                        </div>
+                        <span class="project-updated">{{ result.status or 'completed' }}{% if result.completed_at %} • {{ result.completed_at }}{% endif %}</span>
+                    </button>
+                    <div class="project-details" hidden>
+                        <div class="detail-line"><strong>Status:</strong> {{ result.status or 'completed' }}</div>
+                        {% if result.output_path %}<div class="detail-line"><strong>Output directory:</strong> {{ result.output_path }}</div>{% endif %}
+                        {% if result.completed_at %}<div class="detail-line"><strong>Finished:</strong> {{ result.completed_at }}</div>{% endif %}
+                        <div class="detail-line"><strong>Safe mode:</strong> {{ 'enabled' if result.safe_mode else 'disabled' }}</div>
+                        {% if result.download_url %}<a class="download" href="{{ result.download_url }}">Download archive</a>{% endif %}
+                        {% if result.detected_stack %}
+                        <details class="detail-block">
+                            <summary>Detected stack</summary>
+                            <pre>{{ result.detected_stack | tojson(indent=2) }}</pre>
+                        </details>
+                        {% endif %}
+                        {% if result.architecture %}
+                        <details class="detail-block">
+                            <summary>Architecture mapping</summary>
+                            <pre>{{ result.architecture | tojson(indent=2) }}</pre>
+                        </details>
+                        {% endif %}
+                        {% if result.compatibility %}
+                        <details class="detail-block">
+                            <summary>Alternative suggestions</summary>
+                            <pre>{{ result.compatibility | tojson(indent=2) }}</pre>
+                        </details>
+                        {% endif %}
+                        {% if result.plan %}
+                        <details class="detail-block">
+                            <summary>Migration plan</summary>
+                            <ul>
+                            {% for step in result.plan %}
+                                <li>{{ step }}</li>
+                            {% endfor %}
+                            </ul>
+                        </details>
+                        {% endif %}
+                        {% if result.classification %}
+                        <details class="detail-block">
+                            <summary>Classification summary</summary>
+                            <pre>{{ result.classification | tojson(indent=2) }}</pre>
+                        </details>
+                        {% endif %}
+                        {% if result.dependencies %}
+                        <details class="detail-block">
+                            <summary>Dependency manifests</summary>
+                            <pre>{{ result.dependencies | tojson(indent=2) }}</pre>
+                        </details>
+                        {% endif %}
+                        {% if result.dependency_resolution %}
+                        <details class="detail-block">
+                            <summary>Dependency handling</summary>
+                            <pre>{{ result.dependency_resolution | tojson(indent=2) }}</pre>
+                        </details>
+                        {% endif %}
+                        {% if result.token_usage %}
+                        <details class="detail-block">
+                            <summary>Token usage</summary>
+                            <pre>{{ result.token_usage | tojson(indent=2) }}</pre>
+                        </details>
+                        {% endif %}
+                        {% if result.cost_estimate %}
+                        <details class="detail-block">
+                            <summary>H100 cost estimate</summary>
+                            <pre>{{ result.cost_estimate | tojson(indent=2) }}</pre>
+                        </details>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </section>
         {% endif %}
         <footer>
             Powered by Christophe — upload, track, and download your migrated projects securely.
@@ -589,15 +623,12 @@
     <script>
         (function () {
             const token = {{ user_token | tojson }};
-            const projectsUrl = {{ url_for('api_projects') | tojson }};
             const initialPending = {{ pending_projects | tojson }};
             const initialCompleted = {{ completed_projects | tojson }};
             const activeContainer = document.getElementById('active-projects');
             const completedContainer = document.getElementById('completed-projects');
             const activeEmpty = document.getElementById('active-empty');
             const completedEmpty = document.getElementById('completed-empty');
-            const pollInterval = 5000;
-
             function renderProjects(projects, container, emptyElement, mode) {
                 if (!container || !emptyElement) {
                     return;
@@ -720,6 +751,14 @@
                     details.appendChild(buildDetailHeading('Cost estimate'));
                     details.appendChild(buildDetailBlock(project.cost_estimate));
                 }
+                if (project.architecture) {
+                    details.appendChild(buildDetailHeading('Architecture mapping'));
+                    details.appendChild(buildDetailBlock(project.architecture));
+                }
+                if (project.compatibility) {
+                    details.appendChild(buildDetailHeading('Alternative suggestions'));
+                    details.appendChild(buildDetailBlock(project.compatibility));
+                }
                 if (project.error) {
                     details.appendChild(buildDetailHeading('Last error'));
                     details.appendChild(buildErrorBlock(project.error));
@@ -736,6 +775,7 @@
                     header.setAttribute('aria-expanded', expanded ? 'true' : 'false');
                     details.hidden = !expanded;
                 });
+                header.dataset.collapseBound = 'true';
 
                 return row;
             }
@@ -828,30 +868,27 @@
             }
 
             applyData(initialPending || [], initialCompleted || []);
-
-            if (!token || !projectsUrl) {
-                return;
-            }
-
-            async function pollProjects() {
-                try {
-                    const response = await fetch(projectsUrl, {
-                        headers: { Authorization: `Bearer ${token}` },
-                    });
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}`);
-                    }
-                    const payload = await response.json();
-                    const projects = Array.isArray(payload.projects) ? payload.projects : [];
-                    const groups = partitionProjects(projects);
-                    applyData(groups.pending, groups.completed);
-                } catch (error) {
-                    console.error('Project polling failed', error);
+        })();
+    </script>
+    <script>
+        (function () {
+            document.querySelectorAll('.project-header').forEach((header) => {
+                if (header.dataset.collapseBound === 'true') {
+                    return;
                 }
-            }
-
-            pollProjects();
-            setInterval(pollProjects, pollInterval);
+                const row = header.closest('.project-row');
+                const details = row ? row.querySelector('.project-details') : null;
+                if (!row || !details) {
+                    return;
+                }
+                header.addEventListener('click', () => {
+                    const expanded = !row.classList.contains('expanded');
+                    row.classList.toggle('expanded', expanded);
+                    header.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+                    details.hidden = !expanded;
+                });
+                header.dataset.collapseBound = 'true';
+            });
         })();
     </script>
 </body>

@@ -76,6 +76,17 @@ The resulting architecture map is stored alongside each migration, exposed via
 the API, and visible in the dashboard so you can audit how source files were
 reorganised without opening the generated archive.
 
+## Compatibility research for legacy imports
+
+`CompatibilitySearchAgent` inspects legacy manifests and import statements,
+queries DuckDuckGo via LangChain when available, and asks the LLM for
+target-language friendly alternatives. The resulting guidance lists suggested
+libraries/APIs, recommended actions, and confidence notes tailored to the
+requested destination stack. Each migration records the compatibility payload
+alongside the architecture map so you can review web-sourced hints directly
+from the dashboard or API before adopting third-party packages in the target
+project.
+
 ## Authenticated workspaces and project tracking
 
 Launching the Flask server now presents a lightweight authentication screen.

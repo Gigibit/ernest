@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from analysis.compatibility_agent import CompatibilitySearchAgent
 from analysis.dependency_agent import DependencyAnalysisAgent
 from analysis.heuristic_agent import HeuristicAnalysisAgent
 from analysis.semantic_graph import SemanticGraphBuilder
@@ -46,6 +47,7 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
     "adapt": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1024, "temp": 0.0},
     "scaffold": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 2048, "temp": 0.1},
     "dependency": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1536, "temp": 0.0},
+    "compatibility": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1536, "temp": 0.0},
 }
 
 
@@ -220,6 +222,7 @@ def run_migration(
     logging.info("Starting migration for %s", zip_path)
 
     architecture_map: Dict[str, Dict[str, str]] = {}
+    compatibility_report: Dict[str, Any] = {}
 
     with tempfile.TemporaryDirectory(prefix="christophe_") as tmp:
         temp_dir = Path(tmp)
@@ -310,6 +313,20 @@ def run_migration(
             len(dependency_resolution.get("downloads", []) or []),
         )
 
+        compatibility_agent = CompatibilitySearchAgent(
+            temp_dir, llm_service, cache_manager
+        )
+        compatibility_report = compatibility_agent.suggest(
+            source_files=classification.get("source", []) or [],
+            dependencies=snapshot_dependencies,
+            target_language=target_lang,
+            target_framework=target_framework,
+        )
+        logging.info(
+            "Compatibility agent produced %d guidance entries",
+            len(compatibility_report.get("entries", [])),
+        )
+
         logging.info("Beginning source translation for %d files", len(plan))
         for index, src in enumerate(plan, start=1):
             source_file = temp_dir / src
@@ -394,6 +411,7 @@ def run_migration(
         "recovery_path": recovery_path,
         "dependencies": dependency_snapshot,
         "dependency_resolution": dependency_resolution,
+        "compatibility": compatibility_report,
         "token_usage": token_usage,
         "cost_estimate": cost_estimate,
         "safe_mode": safe_mode,
@@ -474,6 +492,7 @@ def create_app(
             "detected_stack": migration.get("detected_stack"),
             "plan": migration.get("plan"),
             "architecture": migration.get("architecture"),
+            "compatibility": migration.get("compatibility"),
             "error": None,
         }
         record = user_store.update_project(user_id, project_id, **metadata) or metadata
@@ -719,10 +738,14 @@ def create_app(
                     safe_mode_result = migration.get("safe_mode", safe_mode_enabled)
                     result_payload = {
                         "project_id": final_record.get("id"),
+                        "status": final_record.get("status"),
+                        "completed_at": final_record.get("completed_at"),
+                        "updated_at": final_record.get("updated_at"),
                         "project_name": migration["project_name"],
                         "output_path": str(migration["target_path"]),
                         "detected_stack": migration["detected_stack"],
                         "architecture": migration.get("architecture", {}),
+                        "compatibility": migration.get("compatibility", {}),
                         "plan": migration["plan"],
                         "classification": migration["classification"],
                         "dependencies": migration.get("dependencies", {}),
@@ -1033,6 +1056,11 @@ def main() -> None:
         print_section(
             "Gestione Dipendenze",
             json.dumps(resolution, indent=2, ensure_ascii=False),
+        )
+    if result.get("compatibility"):
+        print_section(
+            "Alternative Consigliate",
+            json.dumps(result["compatibility"], indent=2, ensure_ascii=False),
         )
     if result.get("token_usage"):
         print_section("Consumo Token", json.dumps(result["token_usage"], indent=2))
