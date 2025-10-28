@@ -1,9 +1,13 @@
 # core/llm_service.py
-import logging, hashlib
+import hashlib
+import logging
+import os
+import shutil
 from collections import defaultdict
 from typing import Dict
 
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+import torch
 
 from core.env import load_env_file
 
@@ -19,6 +23,7 @@ class LLMService:
         self._usage = defaultdict(
             lambda: {"prompt_tokens": 0, "completion_tokens": 0, "invocations": 0}
         )
+        self._log_hardware_state()
 
     def _get_pipe(self, name):
         if name in self._pipes:
@@ -40,12 +45,21 @@ class LLMService:
         tokenizer = pipe_bundle["tokenizer"]
         max_tokens = overrides.get("max_new_tokens", prof.get("max", 512))
         prompt_tokens = self._count_tokens(tokenizer, prompt)
+        temperature = overrides.get("temperature", prof.get("temp", 0.0))
+        do_sample = overrides.get("do_sample")
+        if do_sample is None:
+            do_sample = temperature > 0
+
+        generation_kwargs = {
+            "max_new_tokens": max_tokens,
+            "do_sample": do_sample,
+            "top_p": overrides.get("top_p", prof.get("top_p", 1.0)),
+        }
+        if do_sample and temperature:
+            generation_kwargs["temperature"] = temperature
         out = pipe(
             prompt,
-            max_new_tokens=max_tokens,
-            do_sample=False,
-            temperature=prof.get("temp", 0.0),
-            top_p=prof.get("top_p", 1.0),
+            **generation_kwargs,
         )
         generated = out[0]["generated_text"]
         completion = generated[len(prompt) :]
@@ -100,3 +114,29 @@ class LLMService:
         record["prompt_tokens"] += prompt_tokens
         record["completion_tokens"] += completion_tokens
         record["invocations"] += 1
+
+    def _log_hardware_state(self) -> None:
+        try:
+            if torch.cuda.is_available():
+                device_count = torch.cuda.device_count()
+                devices = ", ".join(torch.cuda.get_device_name(i) for i in range(device_count))
+                logging.info("CUDA devices detected: %s", devices)
+                if shutil.which("nvcc") is None:
+                    logging.warning(
+                        "CUDA runtime available but nvcc compiler missing. Install NVIDIA drivers/toolkit for optimal performance."
+                    )
+            else:
+                gpu_hint = os.environ.get("CUDA_VISIBLE_DEVICES")
+                if gpu_hint and gpu_hint not in {"", "-1"}:
+                    logging.warning(
+                        "CUDA_VISIBLE_DEVICES=%s but torch reports no GPU. Missing drivers?",
+                        gpu_hint,
+                    )
+                elif shutil.which("nvidia-smi"):
+                    logging.warning(
+                        "nvidia-smi detected without CUDA support in torch. Install or update NVIDIA drivers."
+                    )
+                else:
+                    logging.info("CUDA not available; running migrations on CPU.")
+        except Exception as exc:  # noqa: BLE001
+            logging.warning("Unable to determine CUDA support: %s", exc)

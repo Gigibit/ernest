@@ -11,6 +11,7 @@ import logging
 import os
 import shutil
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -209,6 +210,9 @@ def create_app(
 
     llm_service = llm or LLMService(DEFAULT_PROFILES)
     cache_manager = cache or CacheManager(Path(".cache/migration_cache.db"))
+    executor = ThreadPoolExecutor(
+        max_workers=int(os.environ.get("CHRISTOPHE_WORKERS", "2"))
+    )
 
     base_output_root = output_root or Path("output_project")
     web_output_root = base_output_root / "web"
@@ -261,6 +265,55 @@ def create_app(
             status="failed",
             error=message,
         )
+
+    def _schedule_api_migration(
+        *,
+        user_id: str,
+        project_id: str,
+        archive_path: Path,
+        target_framework: str,
+        target_lang: str,
+        src_lang: Optional[str],
+        src_framework: Optional[str],
+        page_size: Optional[int],
+        refine_passes: int,
+        safe_mode: bool,
+    ) -> None:
+        user_output_root = api_output_root / user_id / project_id
+        user_output_root.mkdir(parents=True, exist_ok=True)
+
+        def _runner() -> None:
+            try:
+                user_store.update_project(
+                    user_id,
+                    project_id,
+                    status="processing",
+                    error=None,
+                    started_at=_timestamp(),
+                )
+                migration = run_migration(
+                    archive_path,
+                    target_framework,
+                    target_lang,
+                    src_lang=src_lang,
+                    src_framework=src_framework,
+                    reuse_cache=True,
+                    output_root=user_output_root,
+                    llm=llm_service,
+                    cache=cache_manager,
+                    page_size=page_size,
+                    refine_passes=refine_passes,
+                    safe_mode=safe_mode,
+                )
+            except Exception as exc:  # noqa: BLE001
+                app.logger.exception("API migration failed for project %s", project_id)
+                _finalise_failure(user_id, project_id, str(exc))
+            else:
+                _finalise_success(user_id, project_id, migration)
+            finally:
+                archive_path.unlink(missing_ok=True)
+
+        executor.submit(_runner)
 
     def _group_projects(user_id: str) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
         pending: list[Dict[str, Any]] = []
@@ -555,62 +608,68 @@ def create_app(
         if not target_framework:
             return ({"error": "target_framework is required."}, 400)
 
+        page_size_raw = (
+            request.form.get("page_size")
+            or request.values.get("page_size")
+            or request.args.get("page_size")
+        )
+        refine_passes_raw = (
+            request.form.get("refine_passes")
+            or request.values.get("refine_passes")
+            or request.args.get("refine_passes")
+        )
+        metadata = {
+            "safe_mode": safe_mode_enabled,
+            "page_size": page_size_raw,
+            "refine_passes": refine_passes_raw,
+        }
+        page_size_value: Optional[int] = None
+        refine_passes_value = 0
+        try:
+            if metadata["page_size"]:
+                page_size_value = max(int(str(metadata["page_size"]).strip()), 0)
+        except (ValueError, TypeError):
+            metadata["page_size_error"] = "invalid"
+        try:
+            if metadata["refine_passes"]:
+                refine_passes_value = max(int(str(metadata["refine_passes"]).strip()), 0)
+        except (ValueError, TypeError):
+            metadata["refine_passes_error"] = "invalid"
+
         project_record = user_store.create_project(
             user_id,
             name=Path(uploaded.filename).stem,
             original_filename=uploaded.filename,
             target_framework=target_framework,
             target_language=target_lang,
+            status="queued",
+            metadata=metadata,
         )
 
         suffix = Path(uploaded.filename).suffix or ".zip"
-        temp_path: Optional[Path] = None
-        try:
-            user_output_root = api_output_root / user_id
-            user_output_root.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
-                uploaded.save(tmp_file)
-                temp_path = Path(tmp_file.name)
+        incoming_dir = api_output_root / user_id / "incoming"
+        incoming_dir.mkdir(parents=True, exist_ok=True)
+        archive_target = incoming_dir / f"{project_record['id']}{suffix}"
+        uploaded.save(str(archive_target))
 
-            migration = run_migration(
-                temp_path,
-                target_framework,
-                target_lang,
-                src_lang=src_lang,
-                src_framework=src_framework,
-                reuse_cache=True,
-                output_root=user_output_root,
-                llm=llm_service,
-                cache=cache_manager,
-                safe_mode=safe_mode_enabled,
-            )
-        except Exception as exc:  # noqa: BLE001
-            app.logger.exception("API migration failed")
-            _finalise_failure(user_id, project_record["id"], str(exc))
-            return ({"error": str(exc)}, 500)
-        finally:
-            if temp_path is not None:
-                temp_path.unlink(missing_ok=True)
+        _schedule_api_migration(
+            user_id=user_id,
+            project_id=project_record["id"],
+            archive_path=archive_target,
+            target_framework=target_framework,
+            target_lang=target_lang,
+            src_lang=src_lang,
+            src_framework=src_framework,
+            page_size=page_size_value,
+            refine_passes=refine_passes_value,
+            safe_mode=safe_mode_enabled,
+        )
 
-        final_record = _finalise_success(user_id, project_record["id"], migration)
         response = {
-            "project_id": final_record.get("id"),
-            "project_name": migration["project_name"],
-            "output_path": str(migration["target_path"]),
-            "detected_stack": migration["detected_stack"],
-            "classification": migration["classification"],
-            "plan": migration["plan"],
-            "dependencies": migration.get("dependencies", {}),
-            "dependency_resolution": migration.get("dependency_resolution", {}),
-            "token_usage": migration.get("token_usage", {}),
-            "cost_estimate": migration.get("cost_estimate", {}),
-            "safe_mode": migration.get("safe_mode", safe_mode_enabled),
-            "status": final_record.get("status"),
-            "download_url": url_for(
-                "api_download_project",
-                project_id=final_record.get("id"),
-                _external=True,
-            ) if final_record.get("archive_path") else None,
+            "project_id": project_record["id"],
+            "status": "queued",
+            "detail": "Migration accepted for processing.",
+            "projects_url": url_for("api_projects", _external=True),
         }
         return (response, 200)
 

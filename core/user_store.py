@@ -138,13 +138,14 @@ class UserStore:
         original_filename: str,
         target_framework: str,
         target_language: str,
+        status: str = "processing",
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         timestamp = self._now()
         project = ProjectRecord(
             id=uuid4().hex,
             name=name,
-            status="processing",
+            status=status,
             created_at=timestamp,
             updated_at=timestamp,
             original_filename=original_filename,
@@ -152,6 +153,7 @@ class UserStore:
             target_language=target_language,
             metadata=metadata or {},
         )
+        project.metadata.setdefault("error", None)
         with self._lock:
             self._data["projects"].setdefault(user_id, []).append(project.to_dict())
             self._save()
