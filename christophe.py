@@ -484,12 +484,19 @@ def run_migration(
             target_language=target_lang,
             target_framework=target_framework,
             perform_downloads=True,
+            target_project=target_path,
         )
         logging.info(
             "Dependency resolver produced %d planned entries and %d downloads",
             len(dependency_resolution.get("plan", {}).get("dependencies", []) or []),
             len(dependency_resolution.get("downloads", []) or []),
         )
+        rendered_manifests = dependency_resolution.get("rendered_manifests", []) or []
+        if rendered_manifests:
+            logging.info(
+                "Updated %d target manifests with dependency plan",
+                len(rendered_manifests),
+            )
 
         compatibility_agent = CompatibilitySearchAgent(
             temp_dir, llm_service, cache_manager

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import textwrap
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, List, Mapping, Tuple
 
@@ -194,6 +196,10 @@ class DependencyAnalysisAgent:
             return self._parse_pyproject(raw_text)
         if name.endswith("package.json"):
             return self._parse_package_json(raw_text)
+        if name == "pom.xml":
+            return self._parse_maven_pom(raw_text)
+        if name in {"build.gradle", "build.gradle.kts"}:
+            return self._parse_gradle(raw_text)
         return []
 
     @staticmethod
@@ -303,6 +309,67 @@ class DependencyAnalysisAgent:
                             "notes": "parsed from package.json",
                         }
                     )
+        return items
+
+    @staticmethod
+    def _parse_maven_pom(text: str) -> List[Dict[str, object]]:
+        items: List[Dict[str, object]] = []
+        try:
+            root = ET.fromstring(text)
+        except ET.ParseError:
+            return items
+
+        def strip_ns(tag: str) -> str:
+            return tag.split('}', 1)[1] if '}' in tag else tag
+
+        for dependency in root.findall('.//{*}dependency'):
+            record: Dict[str, object] = {}
+            for child in dependency:
+                tag = strip_ns(child.tag).lower()
+                record[tag] = (child.text or '').strip()
+            group = record.get('groupid') or ''
+            artifact = record.get('artifactid') or ''
+            version = record.get('version') or None
+            scope = record.get('scope') or None
+            if not (group or artifact):
+                continue
+            name = f"{group}:{artifact}" if group and artifact else artifact or group
+            items.append(
+                {
+                    "name": name,
+                    "version": version,
+                    "scope": scope or 'runtime',
+                    "notes": "parsed from pom.xml",
+                }
+            )
+        return items
+
+    @staticmethod
+    def _parse_gradle(text: str) -> List[Dict[str, object]]:
+        pattern = re.compile(
+            r"^(?P<configuration>api|implementation|compileOnly|runtimeOnly|testImplementation|testCompile|kapt)\s*\(?(?:['\"])(?P<coordinate>[^'\"\)]+)['\"]\)?",
+            re.MULTILINE,
+        )
+        items: List[Dict[str, object]] = []
+        for match in pattern.finditer(text):
+            coordinate = match.group('coordinate')
+            configuration = match.group('configuration')
+            parts = coordinate.split(':')
+            if len(parts) >= 2:
+                group, artifact, *rest = parts
+                name = f"{group}:{artifact}" if group and artifact else coordinate
+                version = rest[0] if rest else None
+            else:
+                name = coordinate
+                version = None
+            items.append(
+                {
+                    "name": name,
+                    "version": version,
+                    "scope": configuration,
+                    "notes": "parsed from Gradle build file",
+                }
+            )
         return items
 
     @staticmethod

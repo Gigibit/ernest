@@ -39,6 +39,7 @@ class DependencyResolver:
         target_language: str,
         target_framework: str,
         perform_downloads: bool = True,
+        target_project: Path | None = None,
     ) -> Dict[str, Any]:
         """Plan and optionally download the project's dependencies."""
 
@@ -56,7 +57,16 @@ class DependencyResolver:
         downloads = []
         if perform_downloads:
             downloads = self._run_wget(plan)
-        return {"plan": plan, "downloads": downloads}
+        rendered = []
+        if target_project is not None:
+            rendered = self._materialize_manifests(
+                target_project,
+                dependency_snapshot,
+                plan,
+                target_language=target_language,
+                target_framework=target_framework,
+            )
+        return {"plan": plan, "downloads": downloads, "rendered_manifests": rendered}
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -217,6 +227,90 @@ class DependencyResolver:
         logging.info("Completed dependency downloads: %d attempted", len(downloads))
         return downloads
 
+    def _materialize_manifests(
+        self,
+        project_root: Path,
+        snapshot: Mapping[str, Any],
+        plan: Mapping[str, Any],
+        *,
+        target_language: str,
+        target_framework: str,
+    ) -> List[Dict[str, Any]]:
+        manifests: List[Dict[str, Any]] = []
+        project_root = Path(project_root)
+        candidate_names = [
+            "pom.xml",
+            "build.gradle",
+            "build.gradle.kts",
+            "package.json",
+            "requirements.txt",
+        ]
+        snapshot_json = json.dumps(snapshot, indent=2, sort_keys=True)
+        plan_json = json.dumps(plan, indent=2, sort_keys=True)
+
+        for name in candidate_names:
+            path = project_root / name
+            if not path.exists():
+                continue
+            try:
+                original = path.read_text(encoding="utf-8")
+            except OSError:
+                logging.warning("Unable to read manifest %s", path)
+                continue
+
+            prompt = textwrap.dedent(
+                f"""
+                You update dependency manifests after modernisation programmes.
+                Target stack: {target_language} / {target_framework}.
+
+                Existing manifest ({name}):
+                ---
+                {original}
+                ---
+
+                Legacy dependency snapshot:
+                {snapshot_json}
+
+                Resolved migration plan:
+                {plan_json}
+
+                Produce an updated {name} for the target stack that:
+                - Preserves structural elements already present.
+                - Adds dependencies or TODO placeholders reflecting the plan and alternatives.
+                - Keeps valid syntax for {name} and avoids commentary or markdown fences.
+                Respond ONLY with the revised manifest contents.
+                """
+            ).strip()
+
+            cache_key = self.llm.prompt_hash("dependency", prompt)
+            cached = self.cache.get(cache_key)
+            if cached is not None:
+                revised = self._clean_manifest(cached)
+            else:
+                logging.info("Updating target manifest %s using dependency plan", path)
+                response = self.llm.invoke("dependency", prompt, max_new_tokens=1500)
+                revised = self._clean_manifest(response)
+                self.cache.set(cache_key, revised)
+
+            if not revised:
+                logging.warning("Dependency manifest update for %s produced empty output", path)
+                continue
+
+            try:
+                path.write_text(revised, encoding="utf-8")
+            except OSError:
+                logging.exception("Failed to write revised manifest %s", path)
+                continue
+
+            manifests.append(
+                {
+                    "file": str(path.relative_to(project_root)),
+                    "updated": True,
+                }
+            )
+
+        return manifests
+
     @staticmethod
     def _extract_json(text: str) -> Dict[str, Any]:
         if text is None:
@@ -230,3 +324,15 @@ class DependencyResolver:
         except json.JSONDecodeError:
             logging.exception("Failed to decode dependency plan JSON")
             return {}
+
+    @staticmethod
+    def _clean_manifest(text: str) -> str:
+        if text is None:
+            return ""
+        stripped = text.strip()
+        matches = re.findall(r"```(?:[\w+-]*)\n([\s\S]*?)\n```", stripped)
+        if matches:
+            stripped = max(matches, key=len).strip()
+        stripped = re.sub(r"^```(?:[\w+-]*)\s*", "", stripped)
+        stripped = re.sub(r"\s*```$", "", stripped)
+        return stripped.strip()

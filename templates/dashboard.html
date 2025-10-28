@@ -341,15 +341,60 @@
 
         .detail-line strong { color: var(--text-strong); }
 
-        .detail-block {
+        details.detail-collapsible {
             margin-top: 12px;
-            background: rgba(15, 23, 42, 0.75);
+            border-radius: 10px;
+            background: rgba(15, 23, 42, 0.08);
+            border: 1px solid rgba(15, 23, 42, 0.12);
+            padding: 10px 12px;
+        }
+
+        details.detail-collapsible[open] {
+            background: rgba(15, 23, 42, 0.12);
+        }
+
+        details.detail-collapsible summary {
+            cursor: pointer;
+            font-weight: 600;
+            color: var(--text-strong);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            outline: none;
+        }
+
+        details.detail-collapsible summary::-webkit-details-marker { display: none; }
+
+        details.detail-collapsible summary::before {
+            content: '\25B8';
+            transition: transform 0.2s ease;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        details.detail-collapsible[open] summary::before {
+            transform: rotate(90deg);
+        }
+
+        details.detail-collapsible summary:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: 4px;
+        }
+
+        .detail-block {
+            margin: 12px 0 0;
+            background: rgba(15, 23, 42, 0.85);
             color: #e2e8f0;
             padding: 12px 14px;
             border-radius: 10px;
             overflow-x: auto;
             font-family: 'Fira Code', 'Source Code Pro', monospace;
             font-size: 13px;
+        }
+
+        .list-block {
+            list-style: disc inside;
+            padding-left: 0;
         }
 
         .project-details .download {
@@ -518,30 +563,33 @@
                         {% if project.original_filename %}<div class="detail-line"><strong>Original file:</strong> {{ project.original_filename }}</div>{% endif %}
                         {% if project.download_name %}<div class="detail-line"><strong>Output:</strong> {{ project.download_name }}</div>{% endif %}
                         {% if project.cost_estimate %}
-                        <pre class="detail-block">{{ project.cost_estimate | tojson(indent=2) }}</pre>
+                        <details class="detail-collapsible">
+                            <summary>H100 cost estimate</summary>
+                            <pre class="detail-block">{{ project.cost_estimate | tojson(indent=2) }}</pre>
+                        </details>
                         {% endif %}
                         {% if project.architecture %}
-                        <details class="detail-block">
+                        <details class="detail-collapsible">
                             <summary>Architecture mapping</summary>
-                            <pre>{{ project.architecture | tojson(indent=2) }}</pre>
+                            <pre class="detail-block">{{ project.architecture | tojson(indent=2) }}</pre>
                         </details>
                         {% endif %}
                         {% if project.scaffolding_blueprint %}
-                        <details class="detail-block">
+                        <details class="detail-collapsible">
                             <summary>Scaffolding blueprint</summary>
-                            <pre>{{ project.scaffolding_blueprint | tojson(indent=2) }}</pre>
+                            <pre class="detail-block">{{ project.scaffolding_blueprint | tojson(indent=2) }}</pre>
                         </details>
                         {% endif %}
                         {% if project.scaffolding_stubs %}
-                        <details class="detail-block">
+                        <details class="detail-collapsible">
                             <summary>Generated stubs</summary>
-                            <pre>{{ project.scaffolding_stubs | tojson(indent=2) }}</pre>
+                            <pre class="detail-block">{{ project.scaffolding_stubs | tojson(indent=2) }}</pre>
                         </details>
                         {% endif %}
                         {% if project.compatibility %}
-                        <details class="detail-block">
+                        <details class="detail-collapsible">
                             <summary>Alternative suggestions</summary>
-                            <pre>{{ project.compatibility | tojson(indent=2) }}</pre>
+                            <pre class="detail-block">{{ project.compatibility | tojson(indent=2) }}</pre>
                         </details>
                         {% endif %}
                         {% if project.error %}
@@ -578,39 +626,39 @@
                         <div class="detail-line"><strong>Safe mode:</strong> {{ 'enabled' if result.safe_mode else 'disabled' }}</div>
                         {% if result.download_url %}<a class="download" href="{{ result.download_url }}">Download archive</a>{% endif %}
                         {% if result.detected_stack %}
-                        <details class="detail-block">
+                        <details class="detail-collapsible">
                             <summary>Detected stack</summary>
-                            <pre>{{ result.detected_stack | tojson(indent=2) }}</pre>
+                            <pre class="detail-block">{{ result.detected_stack | tojson(indent=2) }}</pre>
                         </details>
                         {% endif %}
                         {% if result.architecture %}
-                        <details class="detail-block">
+                        <details class="detail-collapsible">
                             <summary>Architecture mapping</summary>
-                            <pre>{{ result.architecture | tojson(indent=2) }}</pre>
+                            <pre class="detail-block">{{ result.architecture | tojson(indent=2) }}</pre>
                         </details>
                         {% endif %}
                         {% if result.scaffolding_blueprint %}
-                        <details class="detail-block">
+                        <details class="detail-collapsible">
                             <summary>Scaffolding blueprint</summary>
-                            <pre>{{ result.scaffolding_blueprint | tojson(indent=2) }}</pre>
+                            <pre class="detail-block">{{ result.scaffolding_blueprint | tojson(indent=2) }}</pre>
                         </details>
                         {% endif %}
                         {% if result.scaffolding_stubs %}
-                        <details class="detail-block">
+                        <details class="detail-collapsible">
                             <summary>Generated stubs</summary>
-                            <pre>{{ result.scaffolding_stubs | tojson(indent=2) }}</pre>
+                            <pre class="detail-block">{{ result.scaffolding_stubs | tojson(indent=2) }}</pre>
                         </details>
                         {% endif %}
                         {% if result.compatibility %}
-                        <details class="detail-block">
+                        <details class="detail-collapsible">
                             <summary>Alternative suggestions</summary>
-                            <pre>{{ result.compatibility | tojson(indent=2) }}</pre>
+                            <pre class="detail-block">{{ result.compatibility | tojson(indent=2) }}</pre>
                         </details>
                         {% endif %}
                         {% if result.plan %}
-                        <details class="detail-block">
+                        <details class="detail-collapsible">
                             <summary>Migration plan</summary>
-                            <ul>
+                            <ul class="detail-block list-block">
                             {% for step in result.plan %}
                                 <li>{{ step }}</li>
                             {% endfor %}
@@ -618,33 +666,33 @@
                         </details>
                         {% endif %}
                         {% if result.classification %}
-                        <details class="detail-block">
+                        <details class="detail-collapsible">
                             <summary>Classification summary</summary>
-                            <pre>{{ result.classification | tojson(indent=2) }}</pre>
+                            <pre class="detail-block">{{ result.classification | tojson(indent=2) }}</pre>
                         </details>
                         {% endif %}
                         {% if result.dependencies %}
-                        <details class="detail-block">
+                        <details class="detail-collapsible">
                             <summary>Dependency manifests</summary>
-                            <pre>{{ result.dependencies | tojson(indent=2) }}</pre>
+                            <pre class="detail-block">{{ result.dependencies | tojson(indent=2) }}</pre>
                         </details>
                         {% endif %}
                         {% if result.dependency_resolution %}
-                        <details class="detail-block">
+                        <details class="detail-collapsible">
                             <summary>Dependency handling</summary>
-                            <pre>{{ result.dependency_resolution | tojson(indent=2) }}</pre>
+                            <pre class="detail-block">{{ result.dependency_resolution | tojson(indent=2) }}</pre>
                         </details>
                         {% endif %}
                         {% if result.token_usage %}
-                        <details class="detail-block">
+                        <details class="detail-collapsible">
                             <summary>Token usage</summary>
-                            <pre>{{ result.token_usage | tojson(indent=2) }}</pre>
+                            <pre class="detail-block">{{ result.token_usage | tojson(indent=2) }}</pre>
                         </details>
                         {% endif %}
                         {% if result.cost_estimate %}
-                        <details class="detail-block">
+                        <details class="detail-collapsible">
                             <summary>H100 cost estimate</summary>
-                            <pre>{{ result.cost_estimate | tojson(indent=2) }}</pre>
+                            <pre class="detail-block">{{ result.cost_estimate | tojson(indent=2) }}</pre>
                         </details>
                         {% endif %}
                     </div>
@@ -831,28 +879,22 @@
                     appendDetailLine(details, 'Output', project.download_name);
                 }
                 if (project.cost_estimate) {
-                    details.appendChild(buildDetailHeading('Cost estimate'));
-                    details.appendChild(buildDetailBlock(project.cost_estimate));
+                    details.appendChild(buildCollapsible('H100 cost estimate', project.cost_estimate));
                 }
                 if (project.architecture) {
-                    details.appendChild(buildDetailHeading('Architecture mapping'));
-                    details.appendChild(buildDetailBlock(project.architecture));
+                    details.appendChild(buildCollapsible('Architecture mapping', project.architecture));
                 }
                 if (project.scaffolding_blueprint) {
-                    details.appendChild(buildDetailHeading('Scaffolding blueprint'));
-                    details.appendChild(buildDetailBlock(project.scaffolding_blueprint));
+                    details.appendChild(buildCollapsible('Scaffolding blueprint', project.scaffolding_blueprint));
                 }
                 if (project.scaffolding_stubs && project.scaffolding_stubs.length) {
-                    details.appendChild(buildDetailHeading('Generated stubs'));
-                    details.appendChild(buildDetailBlock(project.scaffolding_stubs));
+                    details.appendChild(buildCollapsible('Generated stubs', project.scaffolding_stubs));
                 }
                 if (project.compatibility) {
-                    details.appendChild(buildDetailHeading('Alternative suggestions'));
-                    details.appendChild(buildDetailBlock(project.compatibility));
+                    details.appendChild(buildCollapsible('Alternative suggestions', project.compatibility));
                 }
                 if (project.pagination) {
-                    details.appendChild(buildDetailHeading('Pagination strategy'));
-                    details.appendChild(buildDetailBlock(project.pagination));
+                    details.appendChild(buildCollapsible('Pagination strategy', project.pagination));
                 }
                 if (project.error) {
                     details.appendChild(buildDetailHeading('Last error'));
@@ -916,6 +958,16 @@
                     block.textContent = String(data);
                 }
                 return block;
+            }
+
+            function buildCollapsible(label, data) {
+                const details = document.createElement('details');
+                details.className = 'detail-collapsible';
+                const summary = document.createElement('summary');
+                summary.textContent = label;
+                details.appendChild(summary);
+                details.appendChild(buildDetailBlock(data));
+                return details;
             }
 
             function buildErrorBlock(message) {
