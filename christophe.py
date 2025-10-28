@@ -194,7 +194,7 @@ def create_app(
         abort,
         g,
         redirect,
-        render_template_string,
+        render_template,
         request,
         send_file,
         session,
@@ -202,7 +202,8 @@ def create_app(
     )
     from werkzeug.utils import secure_filename
 
-    app = Flask(__name__)
+    template_dir = Path(__file__).resolve().with_name("templates")
+    app = Flask(__name__, template_folder=str(template_dir))
     app.secret_key = os.environ.get("CHRISTOPHE_WEB_SECRET", "christophe-dev-secret")
     app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024  # 512 MB uploads
 
@@ -275,283 +276,7 @@ def create_app(
         completed.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
         return pending, completed
 
-    PAGE_TEMPLATE = """
-    <!doctype html>
-    <html lang="en">
-    <head>
-        <meta charset="utf-8">
-        <title>Christophe Migration Portal</title>
-        <style>
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f6fb; margin: 0; padding: 0; }
-            .container { max-width: 1080px; margin: 40px auto; background: #fff; padding: 32px; border-radius: 16px; box-shadow: 0 20px 45px rgba(15, 23, 42, 0.12); }
-            header.top { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
-            header.top h1 { margin: 0; color: #0f172a; }
-            header.top .subtitle { margin: 6px 0 0; color: #475569; }
-            .account { text-align: right; color: #1e293b; }
-            .account code { background: rgba(99, 102, 241, 0.1); padding: 4px 8px; border-radius: 6px; display: inline-block; }
-            .logout { display: inline-block; margin-top: 8px; color: #ef4444; text-decoration: none; font-weight: 600; }
-            form { margin-top: 32px; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; align-items: flex-start; }
-            label { display: block; font-weight: 600; margin-bottom: 6px; color: #334155; }
-            input[type="text"], input[type="number"] { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #cbd5f5; font-size: 15px; }
-            .drop-zone { grid-column: 1 / -1; border: 2px dashed #6366f1; border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; background: rgba(99, 102, 241, 0.05); transition: background 0.2s, border-color 0.2s; }
-            .drop-zone.dragover { background: rgba(99, 102, 241, 0.15); border-color: #4f46e5; }
-            .drop-zone p { margin: 0; color: #4338ca; font-weight: 600; }
-            button { grid-column: 1 / -1; background: linear-gradient(135deg, #4f46e5, #6366f1); color: white; border: none; border-radius: 12px; padding: 14px 18px; font-size: 16px; font-weight: 600; cursor: pointer; box-shadow: 0 14px 35px rgba(79, 70, 229, 0.3); transition: transform 0.15s ease, box-shadow 0.2s ease; }
-            button:hover { transform: translateY(-1px); box-shadow: 0 18px 40px rgba(79, 70, 229, 0.35); }
-            .messages { grid-column: 1 / -1; }
-            .error { background: #fee2e2; color: #b91c1c; padding: 12px 16px; border-radius: 10px; margin-bottom: 12px; }
-            .projects-section { margin-top: 36px; }
-            .projects-section h2 { margin-bottom: 12px; color: #312e81; }
-            .projects-list { display: grid; gap: 16px; }
-            .project-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; background: #f8fafc; }
-            .project-card.completed { background: #eef2ff; border-color: #c7d2fe; }
-            .project-card.failed { background: #fef2f2; border-color: #fecaca; }
-            .project-card .title { font-weight: 600; color: #1e1b4b; }
-            .project-card .meta { margin-top: 6px; font-size: 13px; color: #475569; }
-            .project-card .error-text { margin-top: 10px; color: #b91c1c; font-weight: 600; }
-            .project-card .download { display: inline-block; margin-top: 12px; padding: 8px 14px; border-radius: 8px; background: #4f46e5; color: #fff; text-decoration: none; font-weight: 600; }
-            .project-card .download:hover { background: #4338ca; }
-            .toggle { grid-column: 1 / -1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 18px; }
-            .checkbox-label { display: flex; align-items: center; gap: 12px; font-weight: 600; color: #1e293b; }
-            .checkbox-label input { width: 20px; height: 20px; }
-            .hint { margin-top: 8px; font-size: 13px; color: #475569; }
-            .empty { color: #64748b; font-style: italic; }
-            .result { background: #eef2ff; color: #1e1b4b; padding: 20px 24px; border-radius: 12px; margin-top: 32px; }
-            .result pre { background: rgba(15, 23, 42, 0.85); color: #e2e8f0; padding: 16px; border-radius: 10px; overflow-x: auto; }
-            footer { margin-top: 48px; text-align: center; color: #64748b; font-size: 14px; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <header class="top">
-                <div>
-                    <h1>Christophe Migration Portal</h1>
-                    <p class="subtitle">Upload a ZIP archive and orchestrate safe, paginated migrations.</p>
-                </div>
-                <div class="account">
-                    <div>Workspace <code>{{ user_id }}</code></div>
-                    <div>API token</div>
-                    <code>{{ user_token }}</code>
-                    <div><a class="logout" href="{{ url_for('logout') }}">Log out</a></div>
-                </div>
-            </header>
-            <form method="post" enctype="multipart/form-data">
-                <div>
-                    <label for="target_framework">Target framework</label>
-                    <input id="target_framework" name="target_framework" type="text" value="{{ defaults.target_framework }}" placeholder="e.g. modern service platform">
-                </div>
-                <div>
-                    <label for="target_lang">Target language</label>
-                    <input id="target_lang" name="target_lang" type="text" value="{{ defaults.target_lang }}" placeholder="e.g. Java">
-                </div>
-                <div>
-                    <label for="src_lang">Source language (optional)</label>
-                    <input id="src_lang" name="src_lang" type="text" value="{{ defaults.src_lang }}" placeholder="e.g. legacy batch language">
-                </div>
-                <div>
-                    <label for="src_framework">Source framework (optional)</label>
-                    <input id="src_framework" name="src_framework" type="text" value="{{ defaults.src_framework }}" placeholder="e.g. on-prem enterprise platform">
-                </div>
-                <div>
-                    <label for="page_size">Pagination size (chunks per pass)</label>
-                    <input id="page_size" name="page_size" type="number" min="0" step="1" value="{{ defaults.page_size }}" placeholder="e.g. 5">
-                </div>
-                <div>
-                    <label for="refine_passes">Refinement passes per page</label>
-                    <input id="refine_passes" name="refine_passes" type="number" min="0" step="1" value="{{ defaults.refine_passes }}" placeholder="e.g. 1">
-                </div>
-                <div class="toggle">
-                    <label class="checkbox-label" for="safe_mode">
-                        <input id="safe_mode" name="safe_mode" type="checkbox" value="1" {% if defaults.safe_mode %}checked{% endif %}>
-                        Safe mode (fallback guardrails)
-                    </label>
-                    <div class="hint">Automatically retries risky chunks with strict prompts to avoid conflicts and incomplete files.</div>
-                </div>
-                <div class="drop-zone" id="drop-zone">
-                    <p id="drop-zone-text">Drag &amp; drop your source ZIP or click to browse</p>
-                    <input id="source_zip" name="source_zip" type="file" accept=".zip" hidden required>
-                </div>
-                <div class="messages">
-                {% if errors %}
-                    <div class="error">
-                        <ul>
-                        {% for err in errors %}
-                            <li>{{ err }}</li>
-                        {% endfor %}
-                        </ul>
-                    </div>
-                {% endif %}
-                </div>
-                <button type="submit">Run migration</button>
-            </form>
-            <section class="projects-section">
-                <h2>Active uploads</h2>
-                {% if pending_projects %}
-                <div class="projects-list">
-                    {% for project in pending_projects %}
-                    <div class="project-card {% if project.status == 'failed' %}failed{% endif %}">
-                        <div class="title">{{ project.name }}</div>
-                        <div class="meta">Status: {{ project.status }} • Updated: {{ project.updated_at }}</div>
-                        <div class="meta">Original: {{ project.original_filename }}</div>
-                        {% if project.error %}
-                        <div class="error-text">{{ project.error }}</div>
-                        {% endif %}
-                    </div>
-                    {% endfor %}
-                </div>
-                {% else %}
-                <p class="empty">No active migrations.</p>
-                {% endif %}
-            </section>
-            <section class="projects-section">
-                <h2>Completed migrations</h2>
-                {% if completed_projects %}
-                <div class="projects-list">
-                    {% for project in completed_projects %}
-                    <div class="project-card completed">
-                        <div class="title">{{ project.name }}</div>
-                        <div class="meta">Finished: {{ project.completed_at or project.updated_at }}</div>
-                        <div class="meta">Output: {{ project.download_name }}</div>
-                        {% if project.cost_estimate %}
-                        <pre class="meta">{{ project.cost_estimate | tojson(indent=2) }}</pre>
-                        {% endif %}
-                        <a class="download" href="{{ project.download_url }}">Download archive</a>
-                    </div>
-                    {% endfor %}
-                </div>
-                {% else %}
-                <p class="empty">No completed migrations yet.</p>
-                {% endif %}
-            </section>
-            {% if result %}
-            <div class="result">
-                <h2>Latest migration</h2>
-                <p><strong>Project:</strong> {{ result.project_name }}</p>
-                <p><strong>Output directory:</strong> {{ result.output_path }}</p>
-                {% if result.download_url %}<p><strong>Archive:</strong> <a href="{{ result.download_url }}">Download</a></p>{% endif %}
-                <p><strong>Detected stack:</strong></p>
-                <pre>{{ result.detected_stack | tojson(indent=2) }}</pre>
-                <p><strong>Safe mode:</strong> {{ 'enabled' if result.safe_mode else 'disabled' }}</p>
-                <p><strong>Migration plan:</strong></p>
-                <ul>
-                {% for step in result.plan %}
-                    <li>{{ step }}</li>
-                {% endfor %}
-                </ul>
-                <p><strong>Classification summary:</strong></p>
-                <pre>{{ result.classification | tojson(indent=2) }}</pre>
-                {% if result.dependencies %}
-                <p><strong>Dependency manifests:</strong></p>
-                <pre>{{ result.dependencies | tojson(indent=2) }}</pre>
-                {% endif %}
-                {% if result.dependency_resolution %}
-                <p><strong>Dependency handling:</strong></p>
-                <pre>{{ result.dependency_resolution | tojson(indent=2) }}</pre>
-                {% endif %}
-                {% if result.token_usage %}
-                <p><strong>Token usage:</strong></p>
-                <pre>{{ result.token_usage | tojson(indent=2) }}</pre>
-                {% endif %}
-                {% if result.cost_estimate %}
-                <p><strong>H100 cost estimate:</strong></p>
-                <pre>{{ result.cost_estimate | tojson(indent=2) }}</pre>
-                {% endif %}
-            </div>
-            {% endif %}
-            <footer>
-                Powered by Christophe — upload, track, and download your migrated projects securely.
-            </footer>
-        </div>
-        <script>
-            const dropZone = document.getElementById('drop-zone');
-            const dropZoneText = document.getElementById('drop-zone-text');
-            const fileInput = document.getElementById('source_zip');
 
-            if (dropZone) {
-                dropZone.addEventListener('click', () => fileInput.click());
-
-                fileInput.addEventListener('change', () => {
-                    if (fileInput.files.length > 0) {
-                        dropZoneText.textContent = fileInput.files[0].name;
-                    }
-                });
-
-                ['dragenter', 'dragover'].forEach(eventName => {
-                    dropZone.addEventListener(eventName, (event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        dropZone.classList.add('dragover');
-                    });
-                });
-
-                ['dragleave', 'dragend'].forEach(eventName => {
-                    dropZone.addEventListener(eventName, (event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        dropZone.classList.remove('dragover');
-                    });
-                });
-
-                dropZone.addEventListener('drop', (event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    dropZone.classList.remove('dragover');
-                    const files = event.dataTransfer.files;
-                    if (files.length > 0) {
-                        const file = files[0];
-                        if (!file.name.toLowerCase().endsWith('.zip')) {
-                            alert('Please drop a .zip archive');
-                            return;
-                        }
-                        fileInput.files = files;
-                        dropZoneText.textContent = file.name;
-                    }
-                });
-            }
-        </script>
-    </body>
-    </html>
-    """
-
-    LOGIN_TEMPLATE = """
-    <!doctype html>
-    <html lang="en">
-    <head>
-        <meta charset="utf-8">
-        <title>Authenticate - Christophe</title>
-        <style>
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f172a; margin: 0; padding: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-            .login-container { background: #fff; padding: 36px 40px; border-radius: 16px; box-shadow: 0 20px 45px rgba(15, 23, 42, 0.25); max-width: 420px; width: 100%; }
-            h1 { margin-top: 0; color: #1e1b4b; }
-            p { color: #475569; }
-            label { display: block; margin-bottom: 8px; font-weight: 600; color: #334155; }
-            input[type="password"] { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid #cbd5f5; font-size: 16px; }
-            button { margin-top: 18px; width: 100%; padding: 14px; border: none; border-radius: 12px; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; font-size: 16px; font-weight: 600; cursor: pointer; }
-            .error { background: #fee2e2; color: #b91c1c; padding: 12px 16px; border-radius: 10px; margin-bottom: 12px; }
-        </style>
-    </head>
-    <body>
-        <div class="login-container">
-            <h1>Christophe Portal</h1>
-            <p>Use your passphrase to create or access your personal migration workspace.</p>
-            {% if errors %}
-            <div class="error">
-                <ul>
-                {% for err in errors %}
-                    <li>{{ err }}</li>
-                {% endfor %}
-                </ul>
-            </div>
-            {% endif %}
-            <form method="post">
-                <label for="passphrase">Passphrase</label>
-                <input id="passphrase" name="passphrase" type="password" required autocomplete="current-password">
-                <button type="submit">Continue</button>
-            </form>
-        </div>
-    </body>
-    </html>
-    """
 
     @app.before_request
     def load_user() -> None:
@@ -585,7 +310,7 @@ def create_app(
                 session["user_id"] = auth_result["user_id"]
                 session["token"] = auth_result["token"]
                 return redirect(url_for("index"))
-        return render_template_string(LOGIN_TEMPLATE, errors=errors)
+        return render_template("login.html", errors=errors)
 
     @app.route("/", methods=["GET", "POST"])
     def index() -> Any:
@@ -705,8 +430,8 @@ def create_app(
 
         pending_projects, completed_projects = _group_projects(user_id)
 
-        return render_template_string(
-            PAGE_TEMPLATE,
+        return render_template(
+            "dashboard.html",
             errors=errors,
             result=result_payload,
             defaults=defaults,
