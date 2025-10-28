@@ -55,7 +55,10 @@ class HeuristicAnalysisAgent:
         cached = self.cache.get(key)
         if cached:
             logging.info("Loaded classification from cache")
-            return cached
+            augmented = self._augment_classification(cached, all_files)
+            if augmented != cached:
+                self.cache.set(key, augmented)
+            return augmented
         logging.info("Requesting classification from LLM")
         resp = self.llm.invoke('classify', prompt, max_new_tokens=512)
         try:
@@ -68,6 +71,7 @@ class HeuristicAnalysisAgent:
         except ValueError:
             logging.warning("Classifier returned malformed payload, using fallback heuristics")
             obj = self._fallback_classification(all_files)
+        obj = self._augment_classification(obj, all_files)
         self.cache.set(key, obj)
         return obj
 
@@ -132,6 +136,22 @@ class HeuristicAnalysisAgent:
             logging.debug("Failed to parse JSON payload: %s", exc)
             raise ValueError("No JSON found in LLM response") from exc
 
+    def _augment_classification(
+        self, obj: Dict[str, List[str]], files: List[str]
+    ) -> Dict[str, List[str]]:
+        """Ensure basic language heuristics are represented in the classification."""
+        fallback = self._fallback_classification(files)
+        merged: Dict[str, List[str]] = {}
+        for bucket in ("source", "resource", "other"):
+            combined: List[str] = []
+            seen = set()
+            for name in (obj.get(bucket) or []) + fallback.get(bucket, []):
+                if name not in seen and name in files:
+                    combined.append(name)
+                    seen.add(name)
+            merged[bucket] = combined
+        return merged
+
     def _fallback_classification(self, files: List[str]) -> Dict[str, List[str]]:
         result: Dict[str, List[str]] = {"source": [], "resource": [], "other": []}
         source_ext = {
@@ -153,6 +173,9 @@ class HeuristicAnalysisAgent:
             ".kt",
             ".kts",
             ".swift",
+            ".cbl",
+            ".cob",
+            ".cobol",
         }
         resource_ext = {
             ".json",
