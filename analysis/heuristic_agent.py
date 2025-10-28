@@ -25,11 +25,19 @@ class HeuristicAnalysisAgent:
                     continue
                 files.append(str(rel))
         files.sort()
+        logging.info(
+            "Heuristic gather discovered %d files in %s", len(files), self.project_path
+        )
         return files
 
     def classify_files(self, sample_count: int = 50) -> Dict[str, List[str]]:
         all_files = self.gather_files()
         sample = all_files[:sample_count]
+        logging.info(
+            "Classifying %d files (sample size %d) for heuristic analysis",
+            len(all_files),
+            len(sample),
+        )
         context = "\n".join(f"### {f}\n{read_head(self.project_path / f, max_chars=2000)}" for f in sample)
         prompt = textwrap.dedent(f"""
         You are a project file classifier.
@@ -48,8 +56,18 @@ class HeuristicAnalysisAgent:
         if cached:
             logging.info("Loaded classification from cache")
             return cached
+        logging.info("Requesting classification from LLM")
         resp = self.llm.invoke('classify', prompt, max_new_tokens=512)
-        obj = self._extract_json(resp)
+        try:
+            obj = self._extract_json(resp)
+            logging.info(
+                "Classifier identified %d source and %d resource files",
+                len(obj.get("source", []) or []),
+                len(obj.get("resource", []) or []),
+            )
+        except ValueError:
+            logging.warning("Classifier returned malformed payload, using fallback heuristics")
+            obj = self._fallback_classification(all_files)
         self.cache.set(key, obj)
         return obj
 
@@ -77,14 +95,90 @@ class HeuristicAnalysisAgent:
         if cached:
             logging.info("Loaded stack detection from cache")
             return cached
+        logging.info("Requesting stack detection from LLM")
         resp = self.llm.invoke('analyze', prompt, max_new_tokens=200)
-        obj = self._extract_json(resp)
+        try:
+            obj = self._extract_json(resp)
+            logging.info(
+                "Stack detection result: language=%s framework=%s",
+                obj.get("language"),
+                obj.get("framework"),
+            )
+        except ValueError:
+            logging.warning("Stack detector returned malformed payload, defaulting to null stack")
+            obj = {"language": None, "framework": None}
         self.cache.set(key, obj)
         return obj
 
     def _extract_json(self, text: str) -> dict:
         import re
-        m = re.search(r"\{[\s\S]*\}", text)
-        if not m:
+
+        if not text:
             raise ValueError("No JSON found in LLM response")
-        return json.loads(m.group(0))
+
+        stripped = text.strip()
+        if stripped.startswith("```") and stripped.endswith("```"):
+            parts = stripped.split("```")
+            stripped = "\n".join(part for part in parts if part.strip() and not part.strip().startswith("json"))
+
+        match = re.search(r"\{[\s\S]*\}", stripped)
+        if not match:
+            raise ValueError("No JSON found in LLM response")
+
+        candidate = match.group(0)
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            logging.debug("Failed to parse JSON payload: %s", exc)
+            raise ValueError("No JSON found in LLM response") from exc
+
+    def _fallback_classification(self, files: List[str]) -> Dict[str, List[str]]:
+        result: Dict[str, List[str]] = {"source": [], "resource": [], "other": []}
+        source_ext = {
+            ".py",
+            ".java",
+            ".js",
+            ".ts",
+            ".tsx",
+            ".jsx",
+            ".c",
+            ".cc",
+            ".cpp",
+            ".cs",
+            ".rb",
+            ".go",
+            ".rs",
+            ".php",
+            ".scala",
+            ".kt",
+            ".kts",
+            ".swift",
+        }
+        resource_ext = {
+            ".json",
+            ".xml",
+            ".yml",
+            ".yaml",
+            ".ini",
+            ".cfg",
+            ".env",
+            ".properties",
+            ".sql",
+            ".csv",
+            ".md",
+            ".txt",
+            ".html",
+            ".htm",
+            ".css",
+        }
+
+        for file_path in files:
+            suffix = Path(file_path).suffix.lower()
+            if suffix in source_ext:
+                result["source"].append(file_path)
+            elif suffix in resource_ext or not suffix and is_text_file(self.project_path / file_path):
+                result["resource"].append(file_path)
+            else:
+                result["other"].append(file_path)
+
+        return result
