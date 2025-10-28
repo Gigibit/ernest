@@ -21,24 +21,18 @@ per-file size to choose an appropriate pagination strategy, then optionally
 polishes every page with additional model calls when refinement passes are
 enabled.
 
-### CLI
+### CLI & API defaults
 
-```bash
-python christophe.py your_project.zip --target-framework "modern service stack" \
-  --page-size 5 --refine-passes 1
-```
-
-`--page-size` overrides the automatic pagination and defines how many source
-chunks are grouped per page.  Setting it to `0` forces a single-pass migration,
-while omitting the flag keeps the automatic heuristics.  `--refine-passes` runs
-additional polishing rounds for each page to remove artefacts left by the first
-translation.
+The CLI and REST API now rely entirely on automatic pagination and iterative
+refinement. Page sizes and polish passes are derived from LLM guidance combined
+with project statistics, so no additional flags are required when invoking the
+orchestrator.
 
 ### Web UI
 
-The Flask interface now exposes only the *Refinement passes* control; pagination
-is determined automatically unless you override it via environment variables or
-the API/CLI.
+The Flask interface exposes only the stack descriptors and safe-mode toggle.
+Pagination and refinement behaviour are inferred automatically once the archive
+is queued.
 
 ### Environment overrides
 
@@ -54,6 +48,16 @@ variables when present:
 * `CHRISTOPHE_AUTO_PAGE_PROJECT_FILES`, `..._PROJECT_LINES`, and
   `..._PROJECT_CHUNKS` – adjust when large projects trigger more conservative
   chunk sizes.
+
+Automatic refinement heuristics can also be tuned via:
+
+* `CHRISTOPHE_AUTO_REFINE_BASE` – default number of refinement passes when the
+  active strategy supports iterative polishing (defaults to `1`).
+* `CHRISTOPHE_AUTO_REFINE_COMPLEX` – number of passes used for large or complex
+  artefacts (defaults to `2`).
+* `CHRISTOPHE_AUTO_REFINE_LINES`, `CHRISTOPHE_AUTO_REFINE_CHUNKS`, and
+  `CHRISTOPHE_AUTO_REFINE_PROJECT_LINES` – thresholds that decide when the
+  complex pass count should be applied.
 
 Unset variables fall back to sensible defaults tuned for 7B class models.
 
@@ -117,13 +121,14 @@ guidance so target developers can finish the migration while preserving the
 expected behaviour. Blueprint metadata and stub creation logs surface via the
 CLI output, REST responses, and authenticated dashboard.
 
-## Deterministic dependency extraction fallbacks
+## LLM-guided dependency extraction
 
-While the default behaviour relies on LLM prompts, `DependencyAnalysisAgent`
-now parses common manifest formats (e.g. `requirements.txt`, `pyproject.toml`,
-`package.json`) locally whenever the model omits entries. This guarantees
-critical packages such as `transformers` or `torch` appear in the dependency
-snapshot before compatibility research or blueprint planning occurs.
+`DependencyAnalysisAgent` enumerates repository manifests, asks the LLM for JSON
+summaries, and, when necessary, executes cached Python extractors supplied by
+the model to recover structured dependency data.  This keeps manifest handling
+fully model-driven while still guaranteeing packages such as `transformers` or
+`torch` are captured for downstream planning even when the first response is
+incomplete.
 
 ## Authenticated workspaces and project tracking
 

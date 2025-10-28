@@ -481,15 +481,6 @@
                 <label for="src_framework">Source framework (optional)</label>
                 <input id="src_framework" name="src_framework" type="text" value="{{ defaults.src_framework }}" placeholder="e.g. on-prem enterprise platform">
             </div>
-            <div>
-                <label for="refine_passes">
-                    <span class="label-row">
-                        <span>Refinement passes per page</span>
-                        <span class="tooltip" tabindex="0" role="note" data-tooltip="How many extra polish attempts each page receives after the first translation run." title="How many extra polish attempts each page receives after the first translation run.">?</span>
-                    </span>
-                </label>
-                <input id="refine_passes" name="refine_passes" type="number" min="0" step="1" value="{{ defaults.refine_passes }}" placeholder="e.g. 1">
-            </div>
             <div class="toggle">
                 <label class="checkbox-label" for="safe_mode">
                     <input id="safe_mode" name="safe_mode" type="checkbox" value="1" {% if defaults.safe_mode %}checked{% endif %}>
@@ -895,6 +886,9 @@
                 }
                 if (project.pagination) {
                     details.appendChild(buildCollapsible('Pagination strategy', project.pagination));
+                }
+                if (project.refinement) {
+                    details.appendChild(buildCollapsible('Refinement strategy', project.refinement));
                 }
                 if (project.error) {
                     details.appendChild(buildDetailHeading('Last error'));

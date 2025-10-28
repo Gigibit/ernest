@@ -34,7 +34,9 @@ class SourceMigrator:
         self.auto_pagination: Dict[str, int] = dict(
             auto_pagination or self._load_auto_config()
         )
+        self.auto_refine: Dict[str, int] = self._load_auto_refine_config()
         self.pagination_log: Dict[str, Dict[str, Any]] = {}
+        self.refinement_log: Dict[str, Dict[str, Any]] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -51,7 +53,7 @@ class SourceMigrator:
         dst: Path,
         *,
         page_size: int | None = None,
-        refine_passes: int = 0,
+        refine_passes: int | None = None,
         safe_mode: bool = True,
         **context,
     ) -> Path:
@@ -111,6 +113,13 @@ class SourceMigrator:
                 page_size,
                 project_stats,
             )
+            resolved_refine = self._resolve_refine_passes(
+                strategy,
+                src,
+                chunks,
+                refine_passes,
+                project_stats,
+            )
 
             translated_parts = []
             for page_number, (start, end) in enumerate(
@@ -129,14 +138,14 @@ class SourceMigrator:
                     safe_mode,
                 )
 
-                if refine_passes > 0:
+                if resolved_refine > 0:
                     refined = self._refine_page(
                         strategy,
                         page_translations,
                         page_number,
                         context,
                         llm_overrides,
-                        refine_passes,
+                        resolved_refine,
                     )
                     translated_parts.append(refined)
                 else:
@@ -178,7 +187,7 @@ class SourceMigrator:
         architecture_notes: str | None = None,
         *,
         page_size: int | None = None,
-        refine_passes: int = 0,
+        refine_passes: int | None = None,
         safe_mode: bool = True,
         project_stats: Mapping[str, Any] | None = None,
     ) -> Path:
@@ -205,7 +214,7 @@ class SourceMigrator:
         runtime_configuration: str | None = None,
         *,
         page_size: int | None = None,
-        refine_passes: int = 0,
+        refine_passes: int | None = None,
         safe_mode: bool = True,
         project_stats: Mapping[str, Any] | None = None,
     ) -> Path:
@@ -227,7 +236,7 @@ class SourceMigrator:
         shared_dependencies: str | None = None,
         *,
         page_size: int | None = None,
-        refine_passes: int = 0,
+        refine_passes: int | None = None,
         safe_mode: bool = True,
         project_stats: Mapping[str, Any] | None = None,
     ) -> Path:
@@ -250,7 +259,7 @@ class SourceMigrator:
         integration_notes: str | None = None,
         *,
         page_size: int | None = None,
-        refine_passes: int = 0,
+        refine_passes: int | None = None,
         safe_mode: bool = True,
         project_stats: Mapping[str, Any] | None = None,
     ) -> Path:
@@ -596,6 +605,42 @@ class SourceMigrator:
         }
 
     @staticmethod
+    def _load_auto_refine_config() -> Dict[str, int]:
+        env = os.environ
+
+        def _bounded_int(name: str, default: int, minimum: int = 0) -> int:
+            raw = env.get(name)
+            if raw is None:
+                return default
+            try:
+                value = int(raw)
+            except ValueError:
+                logging.warning(
+                    "Invalid value for %s=%s; falling back to %d", name, raw, default
+                )
+                return default
+            if value < minimum:
+                logging.warning(
+                    "%s must be >= %d, received %d; using %d",
+                    name,
+                    minimum,
+                    value,
+                    default,
+                )
+                return default
+            return value
+
+        return {
+            "base_passes": _bounded_int("CHRISTOPHE_AUTO_REFINE_BASE", 1),
+            "complex_passes": _bounded_int("CHRISTOPHE_AUTO_REFINE_COMPLEX", 2),
+            "line_threshold": _bounded_int("CHRISTOPHE_AUTO_REFINE_LINES", 2200, 1),
+            "chunk_threshold": _bounded_int("CHRISTOPHE_AUTO_REFINE_CHUNKS", 6, 1),
+            "project_line_threshold": _bounded_int(
+                "CHRISTOPHE_AUTO_REFINE_PROJECT_LINES", 80000, 1
+            ),
+        }
+
+    @staticmethod
     def _count_lines(chunks: Sequence[str]) -> int:
         if not chunks:
             return 0
@@ -687,6 +732,100 @@ class SourceMigrator:
                 }
             )
         self.pagination_log[str(src)] = decision
+        return resolved
+
+    def _resolve_refine_passes(
+        self,
+        strategy: TranslationStrategy,
+        src: Path,
+        chunks: Sequence[str],
+        explicit: int | None,
+        project_stats: Mapping[str, Any] | None,
+    ) -> int:
+        total_chunks = len(chunks)
+        line_count = self._count_lines(chunks)
+        mode = "manual" if explicit is not None else "auto"
+
+        def _sanitize(value: int | None) -> int:
+            if value is None:
+                return 0
+            if value <= 0:
+                return 0
+            return value
+
+        if explicit is not None:
+            resolved = _sanitize(explicit)
+            if resolved > 0:
+                logging.info(
+                    "Manual refinement for %s: %d passes (chunks=%d, lines=%d)",
+                    src,
+                    resolved,
+                    total_chunks,
+                    line_count,
+                )
+            else:
+                logging.info(
+                    "Manual refinement for %s disabled (chunks=%d, lines=%d)",
+                    src,
+                    total_chunks,
+                    line_count,
+                )
+        else:
+            resolved = 0
+            if strategy.refine_instructions:
+                resolved = self.auto_refine.get("base_passes", 1) or 0
+                if (
+                    total_chunks >= self.auto_refine.get("chunk_threshold", 6)
+                    or line_count >= self.auto_refine.get("line_threshold", 2200)
+                ):
+                    resolved = max(
+                        resolved, self.auto_refine.get("complex_passes", resolved)
+                    )
+                if project_stats:
+                    project_total_lines = project_stats.get("total_lines")
+                    try:
+                        if project_total_lines and int(project_total_lines) >= self.auto_refine.get(
+                            "project_line_threshold", 80000
+                        ):
+                            resolved = max(
+                                resolved, self.auto_refine.get("complex_passes", resolved)
+                            )
+                    except (TypeError, ValueError):
+                        logging.debug(
+                            "Unable to coerce project total lines %r for refinement heuristics",
+                            project_total_lines,
+                        )
+            if resolved > 0:
+                logging.info(
+                    "Auto refinement for %s: %d passes (chunks=%d, lines=%d)",
+                    src,
+                    resolved,
+                    total_chunks,
+                    line_count,
+                )
+            else:
+                logging.info(
+                    "Auto refinement for %s disabled (chunks=%d, lines=%d)",
+                    src,
+                    total_chunks,
+                    line_count,
+                )
+
+        decision = {
+            "mode": mode,
+            "requested_refine_passes": explicit,
+            "resolved_refine_passes": resolved,
+            "total_chunks": total_chunks,
+            "line_count": line_count,
+        }
+        if project_stats:
+            decision.update(
+                {
+                    "project_total_files": project_stats.get("total_files"),
+                    "project_total_lines": project_stats.get("total_lines"),
+                }
+            )
+        self.refinement_log[str(src)] = decision
         return resolved
 
     def _automatic_page_size(

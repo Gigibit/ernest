@@ -354,14 +354,15 @@ def run_migration(
     llm: Optional[LLMService] = None,
     cache: Optional[CacheManager] = None,
     page_size: Optional[int] = None,
-    refine_passes: int = 0,
+    refine_passes: Optional[int] = None,
     safe_mode: bool = True,
 ) -> Dict[str, Any]:
     """Execute the full migration pipeline for ``zip_path``.
 
     When ``page_size`` is provided the translation of each source artefact is
     paginated to avoid overloading the model context window.  ``refine_passes``
-    controls how many iterative polishing rounds are executed for every page.
+    overrides the automatic refinement heuristics; when ``None`` the migrator
+    chooses how many polishing rounds to perform per page.
     """
 
     output_root = output_root or Path("output_project")
@@ -612,6 +613,13 @@ def run_migration(
         "auto_configuration": getattr(src_migrator, "auto_pagination", {}),
     }
 
+    refinement_report = {
+        "mode": "manual" if refine_passes is not None else "auto",
+        "requested_refine_passes": refine_passes,
+        "decisions": dict(getattr(src_migrator, "refinement_log", {})),
+        "auto_configuration": getattr(src_migrator, "auto_refine", {}),
+    }
+
     return {
         "classification": classification,
         "detected_stack": detected_stack,
@@ -630,6 +638,7 @@ def run_migration(
         "cost_estimate": cost_estimate,
         "safe_mode": safe_mode,
         "pagination": pagination_report,
+        "refinement": refinement_report,
     }
 
 
@@ -711,6 +720,7 @@ def create_app(
             "scaffolding_stubs": migration.get("scaffolding_stubs"),
             "compatibility": migration.get("compatibility"),
             "pagination": migration.get("pagination"),
+            "refinement": migration.get("refinement"),
             "error": None,
         }
         record = user_store.update_project(user_id, project_id, **metadata) or metadata
@@ -740,8 +750,6 @@ def create_app(
         target_lang: str,
         src_lang: Optional[str],
         src_framework: Optional[str],
-        page_size: Optional[int],
-        refine_passes: int,
         safe_mode: bool,
     ) -> None:
         user_output_root = api_output_root / user_id / project_id
@@ -769,8 +777,6 @@ def create_app(
                     output_root=user_output_root,
                     llm=llm_service,
                     cache=cache_manager,
-                    page_size=page_size,
-                    refine_passes=refine_passes,
                     safe_mode=safe_mode,
                 )
             except Exception as exc:  # noqa: BLE001
@@ -795,8 +801,6 @@ def create_app(
         target_lang: str,
         src_lang: Optional[str],
         src_framework: Optional[str],
-        page_size: Optional[int],
-        refine_passes: int,
         safe_mode: bool,
     ) -> None:
         user_output_root = web_output_root / user_id / project_id
@@ -824,8 +828,6 @@ def create_app(
                     output_root=user_output_root,
                     llm=llm_service,
                     cache=cache_manager,
-                    page_size=page_size,
-                    refine_passes=refine_passes,
                     safe_mode=safe_mode,
                 )
             except Exception as exc:  # noqa: BLE001
@@ -934,7 +936,6 @@ def create_app(
             "target_lang": request.form.get("target_lang", "java"),
             "src_lang": request.form.get("src_lang", ""),
             "src_framework": request.form.get("src_framework", ""),
-            "refine_passes": request.form.get("refine_passes", "0"),
             "safe_mode": safe_mode_enabled,
         }
 
@@ -945,10 +946,6 @@ def create_app(
             target_lang = defaults["target_lang"].strip() or "java"
             src_lang = defaults["src_lang"].strip() or None
             src_framework = defaults["src_framework"].strip() or None
-            page_size_value = (request.form.get("page_size", "")).strip()
-            refine_passes_value = defaults["refine_passes"].strip()
-            page_size_int: Optional[int] = None
-            refine_passes_int = 0
             uploaded = request.files.get("source_zip")
 
             if not target_framework:
@@ -958,20 +955,6 @@ def create_app(
             elif not uploaded.filename.lower().endswith(".zip"):
                 errors.append("Uploaded file must have .zip extension.")
 
-            if page_size_value:
-                try:
-                    page_size_int = int(page_size_value)
-                    if page_size_int < 0:
-                        raise ValueError
-                except ValueError:
-                    errors.append("Pagination size must be a non-negative integer.")
-            if refine_passes_value:
-                try:
-                    refine_passes_int = int(refine_passes_value)
-                    if refine_passes_int < 0:
-                        raise ValueError
-                except ValueError:
-                    errors.append("Refinement passes must be a non-negative integer.")
 
             project_record: Optional[Dict[str, Any]] = None
 
@@ -984,8 +967,6 @@ def create_app(
                     metadata = {
                         "queued_at": queued_at,
                         "safe_mode": safe_mode_enabled,
-                        "page_size": page_size_int,
-                        "refine_passes": refine_passes_int,
                         "error": None,
                     }
                     project_record = user_store.create_project(
@@ -1009,8 +990,6 @@ def create_app(
                             error=None,
                             queued_at=project_record.get("queued_at", queued_at),
                             safe_mode=safe_mode_enabled,
-                            page_size=page_size_int,
-                            refine_passes=refine_passes_int,
                         )
                         _schedule_web_migration(
                             user_id=user_id,
@@ -1020,8 +999,6 @@ def create_app(
                             target_lang=target_lang,
                             src_lang=src_lang,
                             src_framework=src_framework,
-                            page_size=page_size_int,
-                            refine_passes=refine_passes_int,
                             safe_mode=safe_mode_enabled,
                         )
                         result_payload = {
@@ -1164,35 +1141,11 @@ def create_app(
         if not target_framework:
             return ({"error": "target_framework is required."}, 400)
 
-        page_size_raw = (
-            request.form.get("page_size")
-            or request.values.get("page_size")
-            or request.args.get("page_size")
-        )
-        refine_passes_raw = (
-            request.form.get("refine_passes")
-            or request.values.get("refine_passes")
-            or request.args.get("refine_passes")
-        )
         metadata = {
             "safe_mode": safe_mode_enabled,
-            "page_size": page_size_raw,
-            "refine_passes": refine_passes_raw,
             "queued_at": _timestamp(),
             "error": None,
         }
-        page_size_value: Optional[int] = None
-        refine_passes_value = 0
-        try:
-            if metadata["page_size"]:
-                page_size_value = max(int(str(metadata["page_size"]).strip()), 0)
-        except (ValueError, TypeError):
-            metadata["page_size_error"] = "invalid"
-        try:
-            if metadata["refine_passes"]:
-                refine_passes_value = max(int(str(metadata["refine_passes"]).strip()), 0)
-        except (ValueError, TypeError):
-            metadata["refine_passes_error"] = "invalid"
 
         project_record = user_store.create_project(
             user_id,
@@ -1218,8 +1171,6 @@ def create_app(
             target_lang=target_lang,
             src_lang=src_lang,
             src_framework=src_framework,
-            page_size=page_size_value,
-            refine_passes=refine_passes_value,
             safe_mode=safe_mode_enabled,
         )
 
@@ -1249,18 +1200,6 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=5000, help="Port for the web interface when --serve is used.")
     parser.add_argument("--debug", action="store_true", help="Enable Flask debug mode when serving the web UI.")
     parser.add_argument(
-        "--page-size",
-        type=int,
-        default=None,
-        help="Number of source chunks to translate per LLM call page. Use 0 to disable pagination.",
-    )
-    parser.add_argument(
-        "--refine-passes",
-        type=int,
-        default=0,
-        help="How many refinement passes to run for each translated page.",
-    )
-    parser.add_argument(
         "--safe-mode",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -1286,11 +1225,6 @@ def main() -> None:
         parser.error("zip_path is required unless --serve is specified")
     if not args.target_framework:
         parser.error("--target-framework is required when running the CLI workflow")
-    if args.page_size is not None and args.page_size < 0:
-        parser.error("--page-size must be >= 0")
-    if args.refine_passes < 0:
-        parser.error("--refine-passes must be >= 0")
-
     llm, cache = build_services()
     try:
         result = run_migration(
@@ -1302,8 +1236,6 @@ def main() -> None:
             reuse_cache=args.reuse_cache,
             llm=llm,
             cache=cache,
-            page_size=args.page_size,
-            refine_passes=args.refine_passes,
             safe_mode=args.safe_mode,
         )
     finally:
