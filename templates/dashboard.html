@@ -358,8 +358,7 @@
         </form>
         <section class="projects-section">
             <h2>Active uploads</h2>
-            {% if pending_projects %}
-            <div class="projects-list">
+            <div class="projects-list" id="active-projects">
                 {% for project in pending_projects %}
                 <div class="project-card {% if project.status == 'failed' %}failed{% endif %}">
                     <div class="title">{{ project.name }}</div>
@@ -371,29 +370,30 @@
                 </div>
                 {% endfor %}
             </div>
-            {% else %}
-            <p class="empty">No active migrations.</p>
-            {% endif %}
+            <p class="empty" id="active-empty" {% if pending_projects %}style="display:none;"{% endif %}>No active migrations.</p>
         </section>
         <section class="projects-section">
             <h2>Completed migrations</h2>
-            {% if completed_projects %}
-            <div class="projects-list">
+            <div class="projects-list" id="completed-projects">
                 {% for project in completed_projects %}
                 <div class="project-card completed">
                     <div class="title">{{ project.name }}</div>
+                    <div class="meta">Status: {{ project.status }} • Updated: {{ project.updated_at }}</div>
                     <div class="meta">Finished: {{ project.completed_at or project.updated_at }}</div>
                     <div class="meta">Output: {{ project.download_name }}</div>
                     {% if project.cost_estimate %}
                     <pre class="meta">{{ project.cost_estimate | tojson(indent=2) }}</pre>
                     {% endif %}
+                    {% if project.error %}
+                    <div class="error-text">{{ project.error }}</div>
+                    {% endif %}
+                    {% if project.download_url %}
                     <a class="download" href="{{ project.download_url }}">Download archive</a>
+                    {% endif %}
                 </div>
                 {% endfor %}
             </div>
-            {% else %}
-            <p class="empty">No completed migrations yet.</p>
-            {% endif %}
+            <p class="empty" id="completed-empty" {% if completed_projects %}style="display:none;"{% endif %}>No completed migrations yet.</p>
         </section>
         {% if result %}
         <div class="result">
@@ -480,6 +480,149 @@
                 }
             });
         }
+    </script>
+    <script>
+        (function () {
+            const token = {{ user_token | tojson }};
+            const projectsUrl = {{ url_for('api_projects') | tojson }};
+            const initialPending = {{ pending_projects | tojson }};
+            const initialCompleted = {{ completed_projects | tojson }};
+            const activeContainer = document.getElementById('active-projects');
+            const completedContainer = document.getElementById('completed-projects');
+            const activeEmpty = document.getElementById('active-empty');
+            const completedEmpty = document.getElementById('completed-empty');
+            const pollInterval = 5000;
+
+            function renderProjects(projects, container, emptyElement, mode) {
+                if (!container || !emptyElement) {
+                    return;
+                }
+                container.innerHTML = '';
+                if (!projects || projects.length === 0) {
+                    emptyElement.style.display = 'block';
+                    return;
+                }
+                emptyElement.style.display = 'none';
+                projects.forEach((project) => {
+                    container.appendChild(buildCard(project, mode));
+                });
+            }
+
+            function buildCard(project, mode) {
+                const card = document.createElement('div');
+                card.className = 'project-card';
+                const status = (project.status || 'unknown').toLowerCase();
+                if (mode === 'completed') {
+                    card.classList.add('completed');
+                } else if (status === 'failed') {
+                    card.classList.add('failed');
+                }
+
+                const title = document.createElement('div');
+                title.className = 'title';
+                title.textContent = project.name || project.project_name || project.id || 'Unnamed project';
+                card.appendChild(title);
+
+                const statusLine = document.createElement('div');
+                statusLine.className = 'meta';
+                const updatedValue = project.updated_at || project.completed_at || '';
+                statusLine.textContent = `Status: ${project.status || 'unknown'} • Updated: ${updatedValue}`;
+                card.appendChild(statusLine);
+
+                if (project.original_filename) {
+                    const original = document.createElement('div');
+                    original.className = 'meta';
+                    original.textContent = `Original: ${project.original_filename}`;
+                    card.appendChild(original);
+                }
+
+                if (mode === 'completed') {
+                    const finished = document.createElement('div');
+                    finished.className = 'meta';
+                    finished.textContent = `Finished: ${project.completed_at || project.updated_at || ''}`;
+                    card.appendChild(finished);
+
+                    if (project.download_name) {
+                        const output = document.createElement('div');
+                        output.className = 'meta';
+                        output.textContent = `Output: ${project.download_name}`;
+                        card.appendChild(output);
+                    }
+
+                    if (project.cost_estimate) {
+                        const cost = document.createElement('pre');
+                        cost.className = 'meta';
+                        try {
+                            cost.textContent = JSON.stringify(project.cost_estimate, null, 2);
+                        } catch (error) {
+                            cost.textContent = String(project.cost_estimate);
+                        }
+                        card.appendChild(cost);
+                    }
+
+                    if (project.download_url) {
+                        const downloadLink = document.createElement('a');
+                        downloadLink.className = 'download';
+                        downloadLink.href = project.download_url;
+                        downloadLink.textContent = 'Download archive';
+                        card.appendChild(downloadLink);
+                    }
+                }
+
+                if (project.error) {
+                    const error = document.createElement('div');
+                    error.className = 'error-text';
+                    error.textContent = project.error;
+                    card.appendChild(error);
+                }
+
+                return card;
+            }
+
+            function partitionProjects(projects) {
+                const pending = [];
+                const completed = [];
+                (projects || []).forEach((project) => {
+                    if (project.status === 'completed' && project.archive_path) {
+                        completed.push(project);
+                    } else {
+                        pending.push(project);
+                    }
+                });
+                return { pending, completed };
+            }
+
+            function applyData(pending, completed) {
+                renderProjects(pending, activeContainer, activeEmpty, 'pending');
+                renderProjects(completed, completedContainer, completedEmpty, 'completed');
+            }
+
+            applyData(initialPending || [], initialCompleted || []);
+
+            if (!token || !projectsUrl) {
+                return;
+            }
+
+            async function pollProjects() {
+                try {
+                    const response = await fetch(projectsUrl, {
+                        headers: { Authorization: `Bearer ${token}` },
+                    });
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                    const payload = await response.json();
+                    const projects = Array.isArray(payload.projects) ? payload.projects : [];
+                    const groups = partitionProjects(projects);
+                    applyData(groups.pending, groups.completed);
+                } catch (error) {
+                    console.error('Project polling failed', error);
+                }
+            }
+
+            pollProjects();
+            setInterval(pollProjects, pollInterval);
+        })();
     </script>
 </body>
 </html>

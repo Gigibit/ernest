@@ -342,8 +342,13 @@ def create_app(
             "project_name": migration.get("project_name"),
             "detected_stack": migration.get("detected_stack"),
             "plan": migration.get("plan"),
+            "error": None,
         }
-        return user_store.update_project(user_id, project_id, **metadata) or metadata
+        record = user_store.update_project(user_id, project_id, **metadata) or metadata
+        app.logger.info(
+            "Project %s completed for user %s", project_id, user_id
+        )
+        return record
 
     def _finalise_failure(user_id: str, project_id: str, message: str) -> None:
         user_store.update_project(
@@ -351,6 +356,10 @@ def create_app(
             project_id,
             status="failed",
             error=message,
+            completed_at=_timestamp(),
+        )
+        app.logger.warning(
+            "Project %s failed for user %s: %s", project_id, user_id, message
         )
 
     def _schedule_api_migration(
@@ -371,6 +380,9 @@ def create_app(
 
         def _runner() -> None:
             try:
+                app.logger.info(
+                    "Project %s for user %s moved to processing", project_id, user_id
+                )
                 user_store.update_project(
                     user_id,
                     project_id,
@@ -401,6 +413,9 @@ def create_app(
                 archive_path.unlink(missing_ok=True)
 
         executor.submit(_runner)
+        app.logger.info(
+            "Project %s for user %s queued for background processing", project_id, user_id
+        )
 
     def _group_projects(user_id: str) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
         pending: list[Dict[str, Any]] = []
@@ -709,6 +724,8 @@ def create_app(
             "safe_mode": safe_mode_enabled,
             "page_size": page_size_raw,
             "refine_passes": refine_passes_raw,
+            "queued_at": _timestamp(),
+            "error": None,
         }
         page_size_value: Optional[int] = None
         refine_passes_value = 0

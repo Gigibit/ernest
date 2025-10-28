@@ -154,6 +154,10 @@ class UserStore:
             metadata=metadata or {},
         )
         project.metadata.setdefault("error", None)
+        if status == "queued":
+            project.metadata.setdefault("queued_at", timestamp)
+        if status == "processing":
+            project.metadata.setdefault("started_at", timestamp)
         with self._lock:
             self._data["projects"].setdefault(user_id, []).append(project.to_dict())
             self._save()
