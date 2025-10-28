@@ -20,6 +20,7 @@ class LLMService:
     def __init__(self, profiles):
         self.profiles = profiles
         self._pipes = {}
+        self._shared_models = {}
         self._usage = defaultdict(
             lambda: {"prompt_tokens": 0, "completion_tokens": 0, "invocations": 0}
         )
@@ -29,13 +30,22 @@ class LLMService:
         if name in self._pipes:
             return self._pipes[name]
         prof = self.profiles[name]
-        logging.info(f"Loading model {prof['id']} for {name}")
-        tok = AutoTokenizer.from_pretrained(prof["id"], use_fast=True)
-        model = AutoModelForCausalLM.from_pretrained(
-            prof["id"], device_map="auto", torch_dtype="auto", trust_remote_code=True
-        )
-        pipe = pipeline("text-generation", model=model, tokenizer=tok)
-        self._pipes[name] = {"pipe": pipe, "profile": prof, "tokenizer": tok}
+        model_id = prof["id"]
+
+        if model_id in self._shared_models:
+            logging.info("Reusing loaded model %s for profile %s", model_id, name)
+            shared = self._shared_models[model_id]
+        else:
+            logging.info("Loading model %s for profile %s", model_id, name)
+            tok = AutoTokenizer.from_pretrained(model_id, use_fast=True)
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id, device_map="auto", torch_dtype="auto", trust_remote_code=True
+            )
+            pipe = pipeline("text-generation", model=model, tokenizer=tok)
+            shared = {"pipe": pipe, "tokenizer": tok}
+            self._shared_models[model_id] = shared
+
+        self._pipes[name] = {"pipe": shared["pipe"], "profile": prof, "tokenizer": shared["tokenizer"]}
         return self._pipes[name]
 
     def invoke(self, name: str, prompt: str, **overrides) -> str:
