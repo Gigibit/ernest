@@ -418,17 +418,42 @@ def create_app(
         )
 
     def _group_projects(user_id: str) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
+        def _timestamp_key(record: Dict[str, Any], *, completed: bool) -> tuple[int, str]:
+            candidates = []
+            if completed:
+                candidates.append(record.get("completed_at"))
+            candidates.extend(
+                [
+                    record.get("updated_at"),
+                    record.get("started_at"),
+                    record.get("created_at"),
+                    record.get("queued_at"),
+                ]
+            )
+            for candidate in candidates:
+                if not candidate:
+                    continue
+                try:
+                    parsed = datetime.fromisoformat(str(candidate).replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                return (-int(parsed.timestamp()), str(candidate))
+            return (0, "")
+
         pending: list[Dict[str, Any]] = []
         completed: list[Dict[str, Any]] = []
         for project in user_store.list_projects(user_id):
             entry = dict(project)
             if entry.get("status") == "completed" and entry.get("archive_path"):
-                entry["download_url"] = url_for("download_project", project_id=entry["id"])
+                entry["download_url"] = url_for(
+                    "api_download_project", project_id=entry["id"]
+                )
                 completed.append(entry)
             else:
                 pending.append(entry)
-        pending.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
-        completed.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
+
+        pending.sort(key=lambda item: _timestamp_key(item, completed=False))
+        completed.sort(key=lambda item: _timestamp_key(item, completed=True))
         return pending, completed
 
 
