@@ -265,6 +265,28 @@ export MIGRATION_PROFILE_TRANSLATE_MAX_TOKENS=4096
 Remember to scale memory, GPU, and disk resources accordingly before switching
 to larger checkpoints.
 
+## Suggested machine capabilities
+
+The platform can execute entirely on CPU-only machines, but the combined
+translation, dependency analysis, and asynchronous background workers benefit
+from additional resources:
+
+* **Memory:** At least 16 GB of RAM is required to load medium-sized language
+  models reliably; 32 GB or more prevents swapping when multiple migrations run
+  concurrently.
+* **CPU:** Eight modern vCPUs keep chunking, archive extraction, and dependency
+  downloads responsive. Heavy workloads with concurrent migrations benefit from
+  16+ vCPUs.
+* **GPU (optional):** A CUDA-capable GPU with 24 GB of VRAM or more (e.g.,
+  NVIDIA H100-class hardware) shortens inference time considerably. If a GPU is
+  present but CUDA drivers/toolkit are missing, the application logs guidance on
+  installing `nvcc` or updating drivers at startup.
+* **Storage:** Reserve at least 20 GB of free disk space for temporary ZIP
+  uploads, generated output archives, cached models, and dependency downloads.
+
+When GPU acceleration is unavailable, the service falls back to CPU inference,
+which increases latency but does not block migrations.
+
 ## Dependency planning and alternative evaluation
 
 The migration workflow now inspects common dependency manifests (e.g.
