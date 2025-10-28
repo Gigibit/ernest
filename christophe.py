@@ -35,11 +35,46 @@ from scaffolding.scaffolding_agent import ScaffoldingAgent
 DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
     "classify": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 512, "temp": 0.1},
     "analyze": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 512, "temp": 0.1},
-    "translate": {"id": "mistralai/Mixtral-8x22B-Instruct-v0.1", "max": 4096, "temp": 0.0},
+    "translate": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 4096, "temp": 0.0},
     "adapt": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1024, "temp": 0.0},
-    "scaffold": {"id": "mistralai/Mixtral-8x22B-Instruct-v0.1", "max": 2048, "temp": 0.1},
+    "scaffold": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 2048, "temp": 0.1},
     "dependency": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1536, "temp": 0.0},
 }
+
+
+def _resolved_profiles() -> Dict[str, Dict[str, Any]]:
+    """Return the default profile set with optional environment overrides."""
+
+    resolved = {name: dict(cfg) for name, cfg in DEFAULT_PROFILES.items()}
+    for name, cfg in resolved.items():
+        prefix = f"MIGRATION_PROFILE_{name.upper()}"
+        override_id = os.environ.get(f"{prefix}_ID")
+        override_max = os.environ.get(f"{prefix}_MAX_TOKENS")
+        override_temp = os.environ.get(f"{prefix}_TEMP")
+
+        if override_id:
+            cfg["id"] = override_id
+        if override_max:
+            try:
+                cfg["max"] = int(override_max)
+            except ValueError:
+                logging.warning(
+                    "Unable to parse %s_MAX_TOKENS=%s as integer; keeping %s",
+                    prefix,
+                    override_max,
+                    cfg["max"],
+                )
+        if override_temp:
+            try:
+                cfg["temp"] = float(override_temp)
+            except ValueError:
+                logging.warning(
+                    "Unable to parse %s_TEMP=%s as float; keeping %s",
+                    prefix,
+                    override_temp,
+                    cfg["temp"],
+                )
+    return resolved
 
 
 def print_section(title: str, content: str) -> None:
@@ -50,7 +85,7 @@ def print_section(title: str, content: str) -> None:
 def build_services(profiles: Optional[Dict[str, Dict[str, Any]]] = None) -> tuple[LLMService, CacheManager]:
     """Initialise the shared LLM and cache services."""
 
-    llm = LLMService(profiles or DEFAULT_PROFILES)
+    llm = LLMService(profiles or _resolved_profiles())
     cache = CacheManager(Path(".cache/migration_cache.db"))
     return llm, cache
 
@@ -78,7 +113,7 @@ def run_migration(
     """
 
     output_root = output_root or Path("output_project")
-    llm_service = llm or LLMService(DEFAULT_PROFILES)
+    llm_service = llm or LLMService(_resolved_profiles())
     cache_manager = cache or CacheManager(Path(".cache/migration_cache.db"))
     close_cache = cache is None
 
@@ -208,7 +243,7 @@ def create_app(
     app.secret_key = os.environ.get("CHRISTOPHE_WEB_SECRET", "christophe-dev-secret")
     app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024  # 512 MB uploads
 
-    llm_service = llm or LLMService(DEFAULT_PROFILES)
+    llm_service = llm or LLMService(_resolved_profiles())
     cache_manager = cache or CacheManager(Path(".cache/migration_cache.db"))
     executor = ThreadPoolExecutor(
         max_workers=int(os.environ.get("CHRISTOPHE_WORKERS", "2"))

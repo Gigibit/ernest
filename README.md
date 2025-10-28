@@ -156,6 +156,56 @@ The CLI, web UI, and REST API include a breakdown under `token_usage` plus an
 `H100 cost estimate` section that approximates GPU time and cost assuming an
 NVIDIA H100-class instance.
 
+## Suggested machine capabilities
+
+The bundled configuration keeps memory usage reasonable by default—all LLM
+profiles now target the 7B-parameter *Mistral Instruct* family so a single
+process can run comfortably on workstation-class hardware.  The platform can
+execute entirely on CPU-only machines, but the combined translation, dependency
+analysis, and asynchronous background workers benefit from additional
+resources:
+
+* **Memory:** 16 GB of RAM is the practical minimum for the default 7B models;
+  allocate 32 GB or more to absorb concurrent migrations.  Loading
+  significantly larger checkpoints (e.g. Mixtral 8x22B) requires 300 GB+ of RAM
+  or sharded GPU VRAM—if you override the defaults (see below) ensure the host
+  meets the vendor’s published requirements.
+* **CPU:** Eight modern vCPUs keep chunking, archive extraction, and dependency
+  downloads responsive. Heavy workloads with concurrent migrations benefit from
+  16+ vCPUs.
+* **GPU (optional):** A CUDA-capable GPU with 24 GB of VRAM or more (e.g.,
+  NVIDIA H100-class hardware) shortens inference time considerably. If a GPU is
+  present but CUDA drivers/toolkit are missing, the application logs guidance on
+  installing `nvcc` or updating drivers at startup.
+* **Storage:** Reserve at least 20 GB of free disk space for temporary ZIP
+  uploads, generated output archives, cached models, and dependency downloads.
+
+When GPU acceleration is unavailable, the service falls back to CPU inference,
+which increases latency but does not block migrations.
+
+### Customising model profiles
+
+You can override any profile via environment variables without modifying the
+source code.  For each profile (`classify`, `analyze`, `translate`, `adapt`,
+`scaffold`, `dependency`) the application reads:
+
+* `MIGRATION_PROFILE_<NAME>_ID` – Hugging Face model identifier to load.
+* `MIGRATION_PROFILE_<NAME>_MAX_TOKENS` – optional integer overriding the
+  maximum generation tokens for that profile.
+* `MIGRATION_PROFILE_<NAME>_TEMP` – optional float to adjust sampling
+  temperature.
+
+For example, to experiment with a larger translation model only when running on
+an appropriately sized machine:
+
+```bash
+export MIGRATION_PROFILE_TRANSLATE_ID=mistralai/Mixtral-8x22B-Instruct-v0.1
+export MIGRATION_PROFILE_TRANSLATE_MAX_TOKENS=4096
+```
+
+Remember to scale memory, GPU, and disk resources accordingly before switching
+to larger checkpoints.
+
 ## Dependency planning and alternative evaluation
 
 The migration workflow now inspects common dependency manifests (e.g.
