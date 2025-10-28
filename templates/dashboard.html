@@ -215,26 +215,95 @@
 
         .projects-section h2 { margin-bottom: 12px; color: #312e81; }
 
-        .projects-list { display: grid; gap: 16px; }
+        .projects-list { display: grid; gap: 12px; }
 
-        .project-card {
+        .project-row {
             border: 1px solid var(--border);
             border-radius: 14px;
-            padding: 18px;
             background: var(--surface-muted);
+            overflow: hidden;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
         }
 
-        .project-card.completed { background: #eef2ff; border-color: #c7d2fe; }
+        .project-row.status-completed { border-left: 5px solid #10b981; }
 
-        .project-card.failed { background: #fef2f2; border-color: #fecaca; }
+        .project-row.status-pending { border-left: 5px solid #f59e0b; }
 
-        .project-card .title { font-weight: 600; color: #1e1b4b; }
+        .project-row.status-failed { border-left: 5px solid #ef4444; }
 
-        .project-card .meta { margin-top: 6px; font-size: 13px; color: var(--text-muted); }
+        .project-row.expanded {
+            box-shadow: 0 12px 30px rgba(79, 70, 229, 0.12);
+            border-color: rgba(79, 70, 229, 0.35);
+        }
 
-        .project-card .error-text { margin-top: 10px; color: #b91c1c; font-weight: 600; }
+        .project-header {
+            width: 100%;
+            border: none;
+            background: transparent;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 18px;
+            cursor: pointer;
+            font: inherit;
+            text-align: left;
+            color: inherit;
+            gap: 16px;
+        }
 
-        .project-card .download {
+        .project-header:focus-visible {
+            outline: 3px solid rgba(99, 102, 241, 0.45);
+            outline-offset: -3px;
+        }
+
+        .project-summary {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            flex: 1;
+        }
+
+        .status-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 999px;
+            flex-shrink: 0;
+        }
+
+        .status-dot.status-completed { background: #10b981; box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25); }
+
+        .status-dot.status-pending { background: #f59e0b; box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25); }
+
+        .status-dot.status-failed { background: #ef4444; box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25); }
+
+        .project-title { font-weight: 600; color: #1e1b4b; }
+
+        .project-updated { color: var(--text-muted); font-size: 13px; }
+
+        .project-details {
+            padding: 0 18px 18px;
+            border-top: 1px solid var(--border);
+            display: none;
+        }
+
+        .project-row.expanded .project-details { display: block; }
+
+        .detail-line { margin-top: 10px; font-size: 14px; color: var(--text-muted); }
+
+        .detail-line strong { color: var(--text-strong); }
+
+        .detail-block {
+            margin-top: 12px;
+            background: rgba(15, 23, 42, 0.75);
+            color: #e2e8f0;
+            padding: 12px 14px;
+            border-radius: 10px;
+            overflow-x: auto;
+            font-family: 'Fira Code', 'Source Code Pro', monospace;
+            font-size: 13px;
+        }
+
+        .project-details .download {
             display: inline-block;
             margin-top: 12px;
             padding: 8px 14px;
@@ -245,7 +314,7 @@
             font-weight: 600;
         }
 
-        .project-card .download:hover { background: #4338ca; }
+        .project-details .download:hover { background: #4338ca; }
 
         .toggle {
             grid-column: 1 / -1;
@@ -360,13 +429,25 @@
             <h2>Active uploads</h2>
             <div class="projects-list" id="active-projects">
                 {% for project in pending_projects %}
-                <div class="project-card {% if project.status == 'failed' %}failed{% endif %}">
-                    <div class="title">{{ project.name }}</div>
-                    <div class="meta">Status: {{ project.status }} • Updated: {{ project.updated_at }}</div>
-                    <div class="meta">Original: {{ project.original_filename }}</div>
-                    {% if project.error %}
-                    <div class="error-text">{{ project.error }}</div>
-                    {% endif %}
+                {% set raw_status = (project.status or 'pending')|lower %}
+                {% set status_category = 'failed' if raw_status in ['failed', 'error', 'ko'] else ('completed' if raw_status == 'completed' else 'pending') %}
+                <div class="project-row status-{{ status_category }}">
+                    <button type="button" class="project-header" aria-expanded="false">
+                        <div class="project-summary">
+                            <span class="status-dot status-{{ status_category }}" aria-hidden="true"></span>
+                            <span class="project-title">{{ project.name or project.project_name or project.id or 'Unnamed project' }}</span>
+                        </div>
+                        <span class="project-updated">{{ project.status or 'unknown' }} • {{ project.updated_at or project.created_at }}</span>
+                    </button>
+                    <div class="project-details" hidden>
+                        <div class="detail-line"><strong>Status:</strong> {{ project.status or 'unknown' }}</div>
+                        {% if project.updated_at %}<div class="detail-line"><strong>Updated:</strong> {{ project.updated_at }}</div>{% endif %}
+                        {% if project.created_at %}<div class="detail-line"><strong>Queued:</strong> {{ project.created_at }}</div>{% endif %}
+                        {% if project.original_filename %}<div class="detail-line"><strong>Original file:</strong> {{ project.original_filename }}</div>{% endif %}
+                        {% if project.error %}
+                        <div class="detail-block" role="alert">{{ project.error }}</div>
+                        {% endif %}
+                    </div>
                 </div>
                 {% endfor %}
             </div>
@@ -376,20 +457,32 @@
             <h2>Completed migrations</h2>
             <div class="projects-list" id="completed-projects">
                 {% for project in completed_projects %}
-                <div class="project-card completed">
-                    <div class="title">{{ project.name }}</div>
-                    <div class="meta">Status: {{ project.status }} • Updated: {{ project.updated_at }}</div>
-                    <div class="meta">Finished: {{ project.completed_at or project.updated_at }}</div>
-                    <div class="meta">Output: {{ project.download_name }}</div>
-                    {% if project.cost_estimate %}
-                    <pre class="meta">{{ project.cost_estimate | tojson(indent=2) }}</pre>
-                    {% endif %}
-                    {% if project.error %}
-                    <div class="error-text">{{ project.error }}</div>
-                    {% endif %}
-                    {% if project.download_url %}
-                    <a class="download" href="{{ project.download_url }}">Download archive</a>
-                    {% endif %}
+                {% set raw_status = (project.status or 'completed')|lower %}
+                {% set status_category = 'failed' if raw_status in ['failed', 'error', 'ko'] else ('completed' if raw_status == 'completed' else 'pending') %}
+                <div class="project-row status-{{ status_category }}">
+                    <button type="button" class="project-header" aria-expanded="false">
+                        <div class="project-summary">
+                            <span class="status-dot status-{{ status_category }}" aria-hidden="true"></span>
+                            <span class="project-title">{{ project.name or project.project_name or project.id or 'Unnamed project' }}</span>
+                        </div>
+                        <span class="project-updated">{{ project.status or 'completed' }} • {{ project.completed_at or project.updated_at }}</span>
+                    </button>
+                    <div class="project-details" hidden>
+                        <div class="detail-line"><strong>Status:</strong> {{ project.status or 'completed' }}</div>
+                        {% if project.completed_at %}<div class="detail-line"><strong>Finished:</strong> {{ project.completed_at }}</div>{% endif %}
+                        {% if project.updated_at %}<div class="detail-line"><strong>Updated:</strong> {{ project.updated_at }}</div>{% endif %}
+                        {% if project.original_filename %}<div class="detail-line"><strong>Original file:</strong> {{ project.original_filename }}</div>{% endif %}
+                        {% if project.download_name %}<div class="detail-line"><strong>Output:</strong> {{ project.download_name }}</div>{% endif %}
+                        {% if project.cost_estimate %}
+                        <pre class="detail-block">{{ project.cost_estimate | tojson(indent=2) }}</pre>
+                        {% endif %}
+                        {% if project.error %}
+                        <div class="detail-block" role="alert">{{ project.error }}</div>
+                        {% endif %}
+                        {% if project.download_url %}
+                        <a class="download" href="{{ project.download_url }}">Download archive</a>
+                        {% endif %}
+                    </div>
                 </div>
                 {% endfor %}
             </div>
