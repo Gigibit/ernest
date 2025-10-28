@@ -234,7 +234,7 @@ class CompatibilitySearchAgent:
             else ""
         )
 
-        prompt = textwrap.dedent(
+        prompt_template = textwrap.dedent(
             """
             You help software teams migrate projects between technology stacks.
             Perform lightweight web research when needed and provide concise guidance.
@@ -242,19 +242,19 @@ class CompatibilitySearchAgent:
             requested target language and framework.
 
             Respond ONLY with JSON using this schema:
-            {
+            {{
               "entries": [
-                {
+                {{
                   "name": "legacy import or dependency",
                   "category": "dependency | api | framework | unknown",
                   "recommended": ["target-side alternative", ...],
                   "actions": "short recommendation text",
                   "confidence": "optional qualitative score",
                   "research": "optional summary of web findings"
-                }
+                }}
               ],
               "notes": "overall guidance for the migration team"
-            }
+            }}
 
             Target language: {language}
             Target framework: {framework}
@@ -262,7 +262,9 @@ class CompatibilitySearchAgent:
             {candidates_json}
             {notes}
             """
-        ).strip().format(
+        ).strip()
+
+        prompt = prompt_template.format(
             language=target_language,
             framework=target_framework,
             candidates_json=json.dumps(list(candidates), ensure_ascii=False, indent=2),
