@@ -16,11 +16,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from analysis.compatibility_agent import CompatibilitySearchAgent
 from analysis.dependency_agent import DependencyAnalysisAgent
 from analysis.heuristic_agent import HeuristicAnalysisAgent
 from analysis.semantic_graph import SemanticGraphBuilder
 from core.cache_manager import CacheManager
-from core.cost_model import estimate_h100_receipt
+from core.cost_model import (
+    DEFAULT_MARKUP_RATE,
+    DEFAULT_RESOURCE_CONTEXT,
+    DEFAULT_RESOURCE_COST,
+    estimate_h100_receipt,
+)
 from core.file_utils import secure_unzip
 from core.llm_service import LLMService
 from core.user_store import UserStore
@@ -28,6 +34,7 @@ from migration.dependency_resolver import DependencyResolver
 from migration.recovery_manager import RecoveryManager
 from migration.resource_migrator import ResourceMigrator
 from migration.source_migrator import SourceMigrator
+from planning.architecture_agent import ArchitecturePlanner
 from planning.planning_agent import PlanningAgent
 from scaffolding.scaffolding_agent import ScaffoldingAgent
 
@@ -35,10 +42,12 @@ from scaffolding.scaffolding_agent import ScaffoldingAgent
 DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
     "classify": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 512, "temp": 0.1},
     "analyze": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 512, "temp": 0.1},
+    "architecture": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1024, "temp": 0.1},
     "translate": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 4096, "temp": 0.0},
     "adapt": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1024, "temp": 0.0},
     "scaffold": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 2048, "temp": 0.1},
     "dependency": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1536, "temp": 0.0},
+    "compatibility": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1536, "temp": 0.0},
 }
 
 
@@ -75,6 +84,96 @@ def _resolved_profiles() -> Dict[str, Dict[str, Any]]:
                     cfg["temp"],
                 )
     return resolved
+
+
+def _coerce_float(value: Optional[str], default: float, env_name: str) -> float:
+    if value is None:
+        return default
+    stripped = value.strip()
+    if not stripped:
+        return default
+    try:
+        return float(stripped)
+    except ValueError:
+        logging.warning(
+            "Unable to parse %s=%s as float; using default %.2f",
+            env_name,
+            value,
+            default,
+        )
+        return default
+
+
+def _coerce_markup(value: Optional[str], default: float) -> float:
+    if value is None:
+        return default
+    stripped = value.strip()
+    if not stripped:
+        return default
+
+    percent_hint = stripped.endswith("%")
+    numeric_portion = stripped[:-1].strip() if percent_hint else stripped
+    try:
+        rate = float(numeric_portion)
+    except ValueError:
+        logging.warning(
+            "Unable to parse markup value %s; using default %.2f",
+            value,
+            default,
+        )
+        return default
+
+    if percent_hint:
+        rate /= 100.0
+
+    if rate < 0:
+        logging.warning(
+            "Markup %.3f is negative; clamping to default %.2f",
+            rate,
+            default,
+        )
+        return default
+
+    if rate > 1.0:
+        logging.warning(
+            "Markup %.3f interpreted as a multiplier (%.1f%%). Append '%%' to use percentage semantics.",
+            rate,
+            rate * 100.0,
+        )
+
+    return rate
+
+
+def _cost_configuration() -> Dict[str, Any]:
+    resource_cost = _coerce_float(
+        os.environ.get("CHRISTOPHE_RESOURCE_COST"),
+        DEFAULT_RESOURCE_COST,
+        "CHRISTOPHE_RESOURCE_COST",
+    )
+
+    markup_source = os.environ.get("CHRISTOPHE_COST_MARKUP") or os.environ.get(
+        "CHRISTOPHE_MARKUP_RATE"
+    )
+    markup_rate = _coerce_markup(markup_source, DEFAULT_MARKUP_RATE)
+
+    raw_time = os.environ.get("CHRISTOPHE_RESOURCE_TIME_LEFT")
+    if raw_time is None:
+        time_remaining = DEFAULT_RESOURCE_CONTEXT
+    else:
+        stripped_time = raw_time.strip()
+        time_remaining = stripped_time or DEFAULT_RESOURCE_CONTEXT
+
+    raw_note = os.environ.get("CHRISTOPHE_RESOURCE_CONTEXT") or os.environ.get(
+        "CHRISTOPHE_RESOURCE_NOTE"
+    )
+    note = raw_note.strip() if raw_note and raw_note.strip() else None
+
+    return {
+        "resource_cost": resource_cost,
+        "markup_rate": markup_rate,
+        "resource_time_left": time_remaining,
+        "resource_note": note,
+    }
 
 
 def print_section(title: str, content: str) -> None:
@@ -122,6 +221,9 @@ def run_migration(
 
     logging.info("Starting migration for %s", zip_path)
 
+    architecture_map: Dict[str, Dict[str, str]] = {}
+    compatibility_report: Dict[str, Any] = {}
+
     with tempfile.TemporaryDirectory(prefix="christophe_") as tmp:
         temp_dir = Path(tmp)
         logging.info("Unpacking archive %s into %s", zip_path, temp_dir)
@@ -160,8 +262,19 @@ def run_migration(
         plan = PlanningAgent().create_plan({}, classification.get("source", []))
         logging.info("Planning produced %d source artefacts", len(plan))
 
-        scaffold_agent = ScaffoldingAgent(llm_service, cache_manager)
         project_name = Path(zip_path.stem).name.replace("-", "_") or "migrated_project"
+        architecture_planner = ArchitecturePlanner(temp_dir, llm_service, cache_manager)
+        architecture_map = architecture_planner.propose(
+            plan,
+            target_language=target_lang,
+            target_framework=target_framework,
+            project_name=project_name,
+        )
+        logging.info(
+            "Architecture planner prepared %d mappings", len(architecture_map)
+        )
+
+        scaffold_agent = ScaffoldingAgent(llm_service, cache_manager)
         target_path = scaffold_agent.generate(
             output_root, project_name, target_framework, target_lang
         )
@@ -200,6 +313,20 @@ def run_migration(
             len(dependency_resolution.get("downloads", []) or []),
         )
 
+        compatibility_agent = CompatibilitySearchAgent(
+            temp_dir, llm_service, cache_manager
+        )
+        compatibility_report = compatibility_agent.suggest(
+            source_files=classification.get("source", []) or [],
+            dependencies=snapshot_dependencies,
+            target_language=target_lang,
+            target_framework=target_framework,
+        )
+        logging.info(
+            "Compatibility agent produced %d guidance entries",
+            len(compatibility_report.get("entries", [])),
+        )
+
         logging.info("Beginning source translation for %d files", len(plan))
         for index, src in enumerate(plan, start=1):
             source_file = temp_dir / src
@@ -208,7 +335,12 @@ def run_migration(
                 logging.warning("Source file %s missing from archive; marked skipped", src)
                 continue
 
-            destination = target_path / "src" / Path(src).with_suffix(".java").name
+            arch_entry = architecture_map.get(src, {})
+            destination_rel = arch_entry.get("target_path") if arch_entry else None
+            if destination_rel:
+                destination = target_path / destination_rel
+            else:
+                destination = target_path / "src" / Path(src).with_suffix(".java").name
             logging.info(
                 "[%d/%d] Translating source artefact %s -> %s",
                 index,
@@ -219,6 +351,10 @@ def run_migration(
             src_migrator.translate_legacy_backend(
                 source_file,
                 destination,
+                target_language=target_lang,
+                target_framework=target_framework,
+                target_package=arch_entry.get("package") if arch_entry else None,
+                architecture_notes=arch_entry.get("notes") if arch_entry else None,
                 page_size=page_size,
                 refine_passes=refine_passes,
                 safe_mode=safe_mode,
@@ -241,7 +377,18 @@ def run_migration(
         if hasattr(llm_service, "get_usage_summary")
         else {}
     )
-    cost_estimate = estimate_h100_receipt(token_usage) if token_usage else {}
+    cost_config = _cost_configuration()
+    cost_estimate = (
+        estimate_h100_receipt(
+            token_usage,
+            resource_cost=cost_config["resource_cost"],
+            markup_rate=cost_config["markup_rate"],
+            resource_time_remaining=cost_config["resource_time_left"],
+            resource_notes=cost_config["resource_note"],
+        )
+        if token_usage
+        else {}
+    )
 
     if token_usage:
         logging.info("Token usage summary: %s", token_usage)
@@ -257,12 +404,14 @@ def run_migration(
         "classification": classification,
         "detected_stack": detected_stack,
         "plan": plan,
+        "architecture": architecture_map,
         "target_path": target_path,
         "output_root": output_root,
         "project_name": project_name,
         "recovery_path": recovery_path,
         "dependencies": dependency_snapshot,
         "dependency_resolution": dependency_resolution,
+        "compatibility": compatibility_report,
         "token_usage": token_usage,
         "cost_estimate": cost_estimate,
         "safe_mode": safe_mode,
@@ -342,6 +491,8 @@ def create_app(
             "project_name": migration.get("project_name"),
             "detected_stack": migration.get("detected_stack"),
             "plan": migration.get("plan"),
+            "architecture": migration.get("architecture"),
+            "compatibility": migration.get("compatibility"),
             "error": None,
         }
         record = user_store.update_project(user_id, project_id, **metadata) or metadata
@@ -418,17 +569,42 @@ def create_app(
         )
 
     def _group_projects(user_id: str) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
+        def _timestamp_key(record: Dict[str, Any], *, completed: bool) -> tuple[int, str]:
+            candidates = []
+            if completed:
+                candidates.append(record.get("completed_at"))
+            candidates.extend(
+                [
+                    record.get("updated_at"),
+                    record.get("started_at"),
+                    record.get("created_at"),
+                    record.get("queued_at"),
+                ]
+            )
+            for candidate in candidates:
+                if not candidate:
+                    continue
+                try:
+                    parsed = datetime.fromisoformat(str(candidate).replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                return (-int(parsed.timestamp()), str(candidate))
+            return (0, "")
+
         pending: list[Dict[str, Any]] = []
         completed: list[Dict[str, Any]] = []
         for project in user_store.list_projects(user_id):
             entry = dict(project)
             if entry.get("status") == "completed" and entry.get("archive_path"):
-                entry["download_url"] = url_for("download_project", project_id=entry["id"])
+                entry["download_url"] = url_for(
+                    "api_download_project", project_id=entry["id"]
+                )
                 completed.append(entry)
             else:
                 pending.append(entry)
-        pending.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
-        completed.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
+
+        pending.sort(key=lambda item: _timestamp_key(item, completed=False))
+        completed.sort(key=lambda item: _timestamp_key(item, completed=True))
         return pending, completed
 
 
@@ -562,9 +738,14 @@ def create_app(
                     safe_mode_result = migration.get("safe_mode", safe_mode_enabled)
                     result_payload = {
                         "project_id": final_record.get("id"),
+                        "status": final_record.get("status"),
+                        "completed_at": final_record.get("completed_at"),
+                        "updated_at": final_record.get("updated_at"),
                         "project_name": migration["project_name"],
                         "output_path": str(migration["target_path"]),
                         "detected_stack": migration["detected_stack"],
+                        "architecture": migration.get("architecture", {}),
+                        "compatibility": migration.get("compatibility", {}),
                         "plan": migration["plan"],
                         "classification": migration["classification"],
                         "dependencies": migration.get("dependencies", {}),
@@ -875,6 +1056,11 @@ def main() -> None:
         print_section(
             "Gestione Dipendenze",
             json.dumps(resolution, indent=2, ensure_ascii=False),
+        )
+    if result.get("compatibility"):
+        print_section(
+            "Alternative Consigliate",
+            json.dumps(result["compatibility"], indent=2, ensure_ascii=False),
         )
     if result.get("token_usage"):
         print_section("Consumo Token", json.dumps(result["token_usage"], indent=2))

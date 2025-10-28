@@ -139,12 +139,27 @@ class SourceMigrator:
             raise
 
     # Convenience wrappers -------------------------------------------------
+    @staticmethod
+    def _format_language_hint(hint: str | None) -> str:
+        if not hint:
+            return ""
+        normalized = hint.strip()
+        if not normalized:
+            return ""
+        if "code" in normalized.lower():
+            return normalized
+        return f"{normalized} code"
+
     def translate_legacy_backend(
         self,
         src: Path,
         dst: Path,
         structure_outline: str = "",
         integration_contracts: str = "",
+        target_language: str | None = None,
+        target_framework: str | None = None,
+        target_package: str | None = None,
+        architecture_notes: str | None = None,
         *,
         page_size: int | None = None,
         refine_passes: int = 0,
@@ -156,6 +171,10 @@ class SourceMigrator:
             dst,
             structure_outline=structure_outline,
             integration_contracts=integration_contracts,
+            target_language=self._format_language_hint(target_language),
+            target_framework=target_framework or "",
+            target_package=target_package or "",
+            architecture_notes=architecture_notes or "",
             page_size=page_size,
             refine_passes=refine_passes,
             safe_mode=safe_mode,
