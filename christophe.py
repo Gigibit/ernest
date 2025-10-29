@@ -6,12 +6,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Sequence
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from analysis.compatibility_agent import CompatibilitySearchAgent
 from analysis.dependency_agent import DependencyAnalysisAgent
@@ -32,15 +33,21 @@ from migration.recovery_manager import RecoveryManager
 from migration.resource_migrator import ResourceMigrator
 from migration.source_migrator import SourceMigrator
 from planning.architecture_agent import ArchitecturePlanner
+from planning.containerization_agent import ContainerizationAgent
 from planning.scaffolding_blueprint_agent import ScaffoldingBlueprintAgent
 from planning.planning_agent import PlanningAgent
 from scaffolding.scaffolding_agent import ScaffoldingAgent
+
+
+ENV_PREFIX = "ERNEST"
+LEGACY_PREFIX = "CHRISTOPHE"
 
 
 DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
     "classify": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 512, "temp": 0.1},
     "analyze": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 512, "temp": 0.1},
     "architecture": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1024, "temp": 0.1},
+    "container": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1024, "temp": 0.0},
     "translate": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 4096, "temp": 0.0},
     "adapt": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1024, "temp": 0.0},
     "scaffold": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 2048, "temp": 0.1},
@@ -143,28 +150,62 @@ def _coerce_markup(value: Optional[str], default: float) -> float:
     return rate
 
 
+def _resolve_env(
+    primary: str,
+    *,
+    legacy: Optional[str] = None,
+) -> Tuple[Optional[str], str]:
+    value = os.environ.get(primary)
+    if value is not None:
+        return value, primary
+    if legacy:
+        legacy_value = os.environ.get(legacy)
+        if legacy_value is not None:
+            return legacy_value, legacy
+    return None, primary
+
+
 def _cost_configuration() -> Dict[str, Any]:
+    resource_value, resource_env = _resolve_env(
+        f"{ENV_PREFIX}_RESOURCE_COST",
+        legacy=f"{LEGACY_PREFIX}_RESOURCE_COST",
+    )
     resource_cost = _coerce_float(
-        os.environ.get("CHRISTOPHE_RESOURCE_COST"),
+        resource_value,
         DEFAULT_RESOURCE_COST,
-        "CHRISTOPHE_RESOURCE_COST",
+        resource_env,
     )
 
-    markup_source = os.environ.get("CHRISTOPHE_COST_MARKUP") or os.environ.get(
-        "CHRISTOPHE_MARKUP_RATE"
+    markup_value, _ = _resolve_env(
+        f"{ENV_PREFIX}_COST_MARKUP",
+        legacy=f"{LEGACY_PREFIX}_COST_MARKUP",
     )
-    markup_rate = _coerce_markup(markup_source, DEFAULT_MARKUP_RATE)
+    if markup_value is None:
+        markup_value, _ = _resolve_env(
+            f"{ENV_PREFIX}_MARKUP_RATE",
+            legacy=f"{LEGACY_PREFIX}_MARKUP_RATE",
+        )
+    markup_rate = _coerce_markup(markup_value, DEFAULT_MARKUP_RATE)
 
-    raw_time = os.environ.get("CHRISTOPHE_RESOURCE_TIME_LEFT")
+    raw_time, _ = _resolve_env(
+        f"{ENV_PREFIX}_RESOURCE_TIME_LEFT",
+        legacy=f"{LEGACY_PREFIX}_RESOURCE_TIME_LEFT",
+    )
     if raw_time is None:
         time_remaining = DEFAULT_RESOURCE_CONTEXT
     else:
         stripped_time = raw_time.strip()
         time_remaining = stripped_time or DEFAULT_RESOURCE_CONTEXT
 
-    raw_note = os.environ.get("CHRISTOPHE_RESOURCE_CONTEXT") or os.environ.get(
-        "CHRISTOPHE_RESOURCE_NOTE"
+    raw_note, _ = _resolve_env(
+        f"{ENV_PREFIX}_RESOURCE_CONTEXT",
+        legacy=f"{LEGACY_PREFIX}_RESOURCE_CONTEXT",
     )
+    if raw_note is None:
+        raw_note, _ = _resolve_env(
+            f"{ENV_PREFIX}_RESOURCE_NOTE",
+            legacy=f"{LEGACY_PREFIX}_RESOURCE_NOTE",
+        )
     note = raw_note.strip() if raw_note and raw_note.strip() else None
 
     return {
@@ -380,7 +421,7 @@ def run_migration(
     scaffolding_blueprint: Dict[str, Any] = {}
     stub_results: list[Dict[str, Any]] = []
 
-    with tempfile.TemporaryDirectory(prefix="christophe_") as tmp:
+    with tempfile.TemporaryDirectory(prefix="ernest_") as tmp:
         temp_dir = Path(tmp)
         logging.info("Unpacking archive %s into %s", zip_path, temp_dir)
         secure_unzip(zip_path, temp_dir)
@@ -498,6 +539,18 @@ def run_migration(
                 "Updated %d target manifests with dependency plan",
                 len(rendered_manifests),
             )
+
+        container_agent = ContainerizationAgent(llm_service, cache_manager)
+        container_plan = container_agent.generate(
+            target_language=target_lang,
+            target_framework=target_framework,
+            detected_stack=detected_stack,
+            dependencies=snapshot_dependencies,
+            architecture_map=architecture_map,
+        )
+        container_written = container_agent.persist(container_plan, target_path)
+        if container_written:
+            container_plan.written_files = container_written
 
         compatibility_agent = CompatibilitySearchAgent(
             temp_dir, llm_service, cache_manager
@@ -634,11 +687,13 @@ def run_migration(
         "dependencies": dependency_snapshot,
         "dependency_resolution": dependency_resolution,
         "compatibility": compatibility_report,
+        "containerization": container_plan.to_payload(),
         "token_usage": token_usage,
         "cost_estimate": cost_estimate,
         "safe_mode": safe_mode,
         "pagination": pagination_report,
         "refinement": refinement_report,
+        "source_archive": str(zip_path.resolve()),
     }
 
 
@@ -665,14 +720,79 @@ def create_app(
 
     template_dir = Path(__file__).resolve().with_name("templates")
     app = Flask(__name__, template_folder=str(template_dir))
-    app.secret_key = os.environ.get("CHRISTOPHE_WEB_SECRET", "christophe-dev-secret")
+    secret_value, _ = _resolve_env(
+        f"{ENV_PREFIX}_WEB_SECRET",
+        legacy=f"{LEGACY_PREFIX}_WEB_SECRET",
+    )
+    app.secret_key = secret_value or "ernest-dev-secret"
     app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024  # 512 MB uploads
+
+    brand_name = "ERNEST"
+    brand_tagline = "Migration Studio"
+    brand_context = {
+        "brand_name": brand_name,
+        "brand_tagline": brand_tagline,
+    }
+
+    @app.context_processor
+    def inject_brand() -> Dict[str, Any]:
+        return dict(brand_context)
+
+    def _interpret_flag(value: Optional[str]) -> Optional[bool]:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if not normalized:
+            return None
+        if normalized in {"1", "true", "yes", "on", "enabled"}:
+            return True
+        if normalized in {"0", "false", "no", "off", "disabled"}:
+            return False
+        return None
+
+    raw_whitelist, _ = _resolve_env(
+        f"{ENV_PREFIX}_PASSPHRASE_WHITELIST",
+        legacy=f"{LEGACY_PREFIX}_PASSPHRASE_WHITELIST",
+    )
+    raw_whitelist = raw_whitelist or ""
+    passphrase_whitelist = {
+        candidate.strip()
+        for candidate in re.split(r"[,\n;]", raw_whitelist)
+        if candidate and candidate.strip()
+    }
+    whitelist_toggle, _ = _resolve_env(
+        f"{ENV_PREFIX}_PASSPHRASE_WHITELIST_ENABLED",
+        legacy=f"{LEGACY_PREFIX}_PASSPHRASE_WHITELIST_ENABLED",
+    )
+    whitelist_override = _interpret_flag(whitelist_toggle)
+    whitelist_enabled = bool(passphrase_whitelist)
+    if whitelist_override is not None:
+        whitelist_enabled = bool(passphrase_whitelist) and whitelist_override
+
+    app.config["PASSPHRASE_WHITELIST_ENABLED"] = whitelist_enabled
+    app.config["PASSPHRASE_WHITELIST"] = passphrase_whitelist
+
+    def _is_passphrase_allowed(candidate: str) -> bool:
+        if not whitelist_enabled:
+            return True
+        return candidate in passphrase_whitelist
 
     llm_service = llm or LLMService(_resolved_profiles())
     cache_manager = cache or CacheManager(Path(".cache/migration_cache.db"))
-    executor = ThreadPoolExecutor(
-        max_workers=int(os.environ.get("CHRISTOPHE_WORKERS", "2"))
+    worker_value, worker_env = _resolve_env(
+        f"{ENV_PREFIX}_WORKERS",
+        legacy=f"{LEGACY_PREFIX}_WORKERS",
     )
+    try:
+        max_workers = int(worker_value) if worker_value else 2
+    except ValueError:
+        logging.warning(
+            "Unable to parse %s=%s as integer; using 2",
+            worker_env,
+            worker_value,
+        )
+        max_workers = 2
+    executor = ThreadPoolExecutor(max_workers=max_workers)
 
     base_output_root = output_root or Path("output_project")
     web_output_root = base_output_root / "web"
@@ -680,7 +800,11 @@ def create_app(
     web_output_root.mkdir(parents=True, exist_ok=True)
     api_output_root.mkdir(parents=True, exist_ok=True)
 
-    store_path = Path(os.environ.get("CHRISTOPHE_USER_STORE", ".cache/users.json"))
+    store_value, _ = _resolve_env(
+        f"{ENV_PREFIX}_USER_STORE",
+        legacy=f"{LEGACY_PREFIX}_USER_STORE",
+    )
+    store_path = Path(store_value or ".cache/users.json")
     user_store = UserStore(store_path)
 
     def _timestamp() -> str:
@@ -697,12 +821,50 @@ def create_app(
         ) or req.values.get("auth_token") or req.values.get("token") or req.values.get("access_token")
 
     def _finalise_success(user_id: str, project_id: str, migration: Dict[str, Any]) -> Dict[str, Any]:
-        archive_file = shutil.make_archive(
-            str(migration["target_path"]),
-            "zip",
-            root_dir=migration["target_path"],
-        )
-        archive_path = Path(archive_file)
+        target_path = Path(migration["target_path"])
+        archive_stem = f"ernst_{project_id}_archive"
+        source_archive = migration.get("source_archive")
+
+        final_path: Optional[Path] = None
+        with tempfile.TemporaryDirectory(prefix="ernest_bundle_") as bundle_tmp:
+            bundle_root = Path(bundle_tmp) / archive_stem
+            input_dir = bundle_root / "input_project"
+            output_dir = bundle_root / "output_project"
+            output_dir.parent.mkdir(parents=True, exist_ok=True)
+
+            shutil.copytree(target_path, output_dir)
+
+            if source_archive:
+                source_path = Path(source_archive)
+                if source_path.exists():
+                    input_dir.mkdir(parents=True, exist_ok=True)
+                    try:
+                        secure_unzip(source_path, input_dir)
+                    except Exception as exc:  # noqa: BLE001
+                        logging.warning(
+                            "Unable to include source archive %s: %s",
+                            source_path,
+                            exc,
+                        )
+                else:
+                    logging.warning(
+                        "Source archive %s missing; creating empty input snapshot",
+                        source_archive,
+                    )
+                    input_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                input_dir.mkdir(parents=True, exist_ok=True)
+
+            archive_file = shutil.make_archive(
+                str(bundle_root),
+                "zip",
+                root_dir=bundle_root.parent,
+                base_dir=bundle_root.name,
+            )
+            final_path = target_path.parent / Path(archive_file).name
+            Path(archive_file).replace(final_path)
+
+        archive_path = final_path or target_path.with_suffix(".zip")
         metadata = {
             "status": "completed",
             "completed_at": _timestamp(),
@@ -719,6 +881,7 @@ def create_app(
             "scaffolding_blueprint": migration.get("scaffolding_blueprint"),
             "scaffolding_stubs": migration.get("scaffolding_stubs"),
             "compatibility": migration.get("compatibility"),
+            "containerization": migration.get("containerization"),
             "pagination": migration.get("pagination"),
             "refinement": migration.get("refinement"),
             "error": None,
@@ -914,11 +1077,21 @@ def create_app(
             if not passphrase:
                 errors.append("Passphrase is required.")
             else:
-                auth_result = user_store.authenticate(passphrase)
-                session["user_id"] = auth_result["user_id"]
-                session["token"] = auth_result["token"]
-                return redirect(url_for("index"))
-        return render_template("login.html", errors=errors)
+                if not _is_passphrase_allowed(passphrase):
+                    app.logger.warning("Rejected login attempt with non-whitelisted passphrase")
+                    errors.append(
+                        "Passphrase is not authorised for this preview."
+                    )
+                else:
+                    auth_result = user_store.authenticate(passphrase)
+                    session["user_id"] = auth_result["user_id"]
+                    session["token"] = auth_result["token"]
+                    return redirect(url_for("index"))
+        return render_template(
+            "login.html",
+            errors=errors,
+            whitelist_active=whitelist_enabled,
+        )
 
     @app.route("/", methods=["GET", "POST"])
     def index() -> Any:
@@ -1050,7 +1223,15 @@ def create_app(
         )
         if not passphrase:
             return ({"error": "passphrase is required"}, 400)
-        auth_result = user_store.authenticate(passphrase.strip())
+        sanitized = passphrase.strip()
+        if not sanitized:
+            return ({"error": "passphrase is required"}, 400)
+        if not _is_passphrase_allowed(sanitized):
+            app.logger.warning(
+                "Rejected API token request with non-whitelisted passphrase"
+            )
+            return ({"error": "passphrase not authorised"}, 403)
+        auth_result = user_store.authenticate(sanitized)
         return (
             {
                 "user_id": auth_result["user_id"],
