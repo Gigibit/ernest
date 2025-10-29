@@ -33,6 +33,7 @@ from migration.recovery_manager import RecoveryManager
 from migration.resource_migrator import ResourceMigrator
 from migration.source_migrator import SourceMigrator
 from planning.architecture_agent import ArchitecturePlanner
+from planning.containerization_agent import ContainerizationAgent
 from planning.scaffolding_blueprint_agent import ScaffoldingBlueprintAgent
 from planning.planning_agent import PlanningAgent
 from scaffolding.scaffolding_agent import ScaffoldingAgent
@@ -42,6 +43,7 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
     "classify": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 512, "temp": 0.1},
     "analyze": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 512, "temp": 0.1},
     "architecture": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1024, "temp": 0.1},
+    "container": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1024, "temp": 0.0},
     "translate": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 4096, "temp": 0.0},
     "adapt": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1024, "temp": 0.0},
     "scaffold": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 2048, "temp": 0.1},
@@ -500,6 +502,18 @@ def run_migration(
                 len(rendered_manifests),
             )
 
+        container_agent = ContainerizationAgent(llm_service, cache_manager)
+        container_plan = container_agent.generate(
+            target_language=target_lang,
+            target_framework=target_framework,
+            detected_stack=detected_stack,
+            dependencies=snapshot_dependencies,
+            architecture_map=architecture_map,
+        )
+        container_written = container_agent.persist(container_plan, target_path)
+        if container_written:
+            container_plan.written_files = container_written
+
         compatibility_agent = CompatibilitySearchAgent(
             temp_dir, llm_service, cache_manager
         )
@@ -635,6 +649,7 @@ def run_migration(
         "dependencies": dependency_snapshot,
         "dependency_resolution": dependency_resolution,
         "compatibility": compatibility_report,
+        "containerization": container_plan.to_payload(),
         "token_usage": token_usage,
         "cost_estimate": cost_estimate,
         "safe_mode": safe_mode,
@@ -765,6 +780,7 @@ def create_app(
             "scaffolding_blueprint": migration.get("scaffolding_blueprint"),
             "scaffolding_stubs": migration.get("scaffolding_stubs"),
             "compatibility": migration.get("compatibility"),
+            "containerization": migration.get("containerization"),
             "pagination": migration.get("pagination"),
             "refinement": migration.get("refinement"),
             "error": None,

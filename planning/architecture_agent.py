@@ -173,21 +173,49 @@ class ArchitecturePlanner:
         target_language: str,
         project_name: str,
     ) -> Dict[str, Dict[str, str]]:
-        extension = self._default_extension(target_language)
-        java_like = extension == ".java"
-        base_package = self._default_package(project_name) if java_like else None
+        default_extension = self._default_extension(target_language)
+        java_like_exts = {".java", ".kt", ".kts", ".scala"}
+        package_friendly_exts = java_like_exts | {".cs"}
+        base_package = (
+            self._default_package(project_name)
+            if default_extension in package_friendly_exts
+            else self._default_package(project_name) if "sap" in (target_language or "").lower() else None
+        )
         mapping: Dict[str, Dict[str, str]] = {}
         for source in sources:
             rel = Path(source)
-            if java_like:
+            source_ext = rel.suffix
+            extension = default_extension
+            if (not extension or extension == ".txt") and source_ext:
+                extension = source_ext
+            if not extension:
+                extension = ""
+            if extension and not extension.startswith("."):
+                extension = f".{extension}"
+
+            if extension in java_like_exts:
                 package = self._join_package(base_package, rel.parent.parts)
                 file_name = f"{self._class_name(rel.stem)}{extension}"
-                path_parts = ["src", "main", "java"] + package.split(".") if package else ["src", "main", "java"]
+                language_folder = {
+                    ".java": "java",
+                    ".kt": "kotlin",
+                    ".kts": "kotlin",
+                    ".scala": "scala",
+                }[extension]
+                path_parts = ["src", "main", language_folder]
+                if package:
+                    path_parts.extend(package.split("."))
                 target_path = str(Path(*path_parts) / file_name)
             else:
-                file_name = f"{self._class_name(rel.stem)}{extension}" if extension else rel.name
-                target_path = str(Path("src") / rel.parent / file_name)
-                package = None
+                package = self._join_package(base_package, rel.parent.parts) if extension in package_friendly_exts else None
+                if extension:
+                    file_name = f"{self._class_name(rel.stem)}{extension}"
+                else:
+                    file_name = rel.name
+                target_root = Path("src")
+                if rel.parent.parts:
+                    target_root = target_root / Path(*rel.parent.parts)
+                target_path = str(target_root / file_name)
             mapping[source] = {
                 "target_path": target_path,
                 "package": package,
@@ -208,6 +236,14 @@ class ArchitecturePlanner:
             "javascript": ".js",
             "go": ".go",
             "rust": ".rs",
+            "python": ".py",
+            "ruby": ".rb",
+            "php": ".php",
+            "cobol": ".cbl",
+            "abap": ".abap",
+            "sap": ".abap",
+            "hana": ".abap",
+            "sap hana": ".abap",
         }
         for key, ext in mapping.items():
             if key in normalized:

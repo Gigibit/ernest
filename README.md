@@ -34,6 +34,25 @@ listed will be rejected server-side and the user will see a "Passphrase is not
 authorised" error. Clearing the whitelist variable or toggling the
 `CHRISTOPHE_PASSPHRASE_WHITELIST_ENABLED` flag disables the restriction.
 
+## Container-ready backend migrations
+
+Whenever a migration targets a backend or service-oriented stack, the
+orchestrator now asks the LLM collective for containerisation guidance. The
+resulting blueprint includes:
+
+* a production-grade `Dockerfile` that favours multi-stage builds and runtime
+  hardening;
+* an optional `docker-compose.yml` with service wiring suited to the detected
+  dependencies;
+* a `.dockerignore` tailored to the generated project structure;
+* operational notes outlining environment variables, health checks, and SAP
+  S/4HANA nuances when applicable.
+
+The planner cross-pollinates signals from the architecture, dependency, and
+compatibility agents to keep the Docker assets aligned with the target
+framework. Existing container files in the scaffold are respected, so you can
+override the generated artefacts manually when necessary.
+
 ## Paginated migrations and iterative refinement
 
 Large projects can be migrated in multiple passes to keep LLM prompts within a
