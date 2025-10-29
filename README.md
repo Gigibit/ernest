@@ -13,6 +13,46 @@ HF_TOKEN=hf_xxx
 The application automatically loads the `.env` file on startup so the token is
 available when downloading models.
 
+## Passphrase whitelist (enterprise PoC)
+
+The authenticated web portal can be locked down to a fixed list of preview
+passphrases so only pre-approved stakeholders can sign in while the proof of
+concept is under review. Configure the guard via `.env`:
+
+```bash
+# Comma, semicolon, or newline separated passphrases that are allowed to sign in
+# via the login form or the `/api/auth` endpoint.
+CHRISTOPHE_PASSPHRASE_WHITELIST="alpha-pass,bravo-pass,charlie-pass"
+
+# Optional toggle. Set to `false`/`0`/`off` to temporarily disable the
+# whitelist without editing the passphrase list.
+CHRISTOPHE_PASSPHRASE_WHITELIST_ENABLED=true
+```
+
+When the whitelist is active, any login attempt using a passphrase that is not
+listed will be rejected server-side and the user will see a "Passphrase is not
+authorised" error. Clearing the whitelist variable or toggling the
+`CHRISTOPHE_PASSPHRASE_WHITELIST_ENABLED` flag disables the restriction.
+
+## Container-ready backend migrations
+
+Whenever a migration targets a backend or service-oriented stack, the
+orchestrator now asks the LLM collective for containerisation guidance. The
+resulting blueprint includes:
+
+* a production-grade `Dockerfile` that favours multi-stage builds and runtime
+  hardening;
+* an optional `docker-compose.yml` with service wiring suited to the detected
+  dependencies;
+* a `.dockerignore` tailored to the generated project structure;
+* operational notes outlining environment variables, health checks, and SAP
+  S/4HANA nuances when applicable.
+
+The planner cross-pollinates signals from the architecture, dependency, and
+compatibility agents to keep the Docker assets aligned with the target
+framework. Existing container files in the scaffold are respected, so you can
+override the generated artefacts manually when necessary.
+
 ## Paginated migrations and iterative refinement
 
 Large projects can be migrated in multiple passes to keep LLM prompts within a

@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -32,6 +33,7 @@ from migration.recovery_manager import RecoveryManager
 from migration.resource_migrator import ResourceMigrator
 from migration.source_migrator import SourceMigrator
 from planning.architecture_agent import ArchitecturePlanner
+from planning.containerization_agent import ContainerizationAgent
 from planning.scaffolding_blueprint_agent import ScaffoldingBlueprintAgent
 from planning.planning_agent import PlanningAgent
 from scaffolding.scaffolding_agent import ScaffoldingAgent
@@ -41,6 +43,7 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
     "classify": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 512, "temp": 0.1},
     "analyze": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 512, "temp": 0.1},
     "architecture": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1024, "temp": 0.1},
+    "container": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1024, "temp": 0.0},
     "translate": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 4096, "temp": 0.0},
     "adapt": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1024, "temp": 0.0},
     "scaffold": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 2048, "temp": 0.1},
@@ -499,6 +502,18 @@ def run_migration(
                 len(rendered_manifests),
             )
 
+        container_agent = ContainerizationAgent(llm_service, cache_manager)
+        container_plan = container_agent.generate(
+            target_language=target_lang,
+            target_framework=target_framework,
+            detected_stack=detected_stack,
+            dependencies=snapshot_dependencies,
+            architecture_map=architecture_map,
+        )
+        container_written = container_agent.persist(container_plan, target_path)
+        if container_written:
+            container_plan.written_files = container_written
+
         compatibility_agent = CompatibilitySearchAgent(
             temp_dir, llm_service, cache_manager
         )
@@ -634,6 +649,7 @@ def run_migration(
         "dependencies": dependency_snapshot,
         "dependency_resolution": dependency_resolution,
         "compatibility": compatibility_report,
+        "containerization": container_plan.to_payload(),
         "token_usage": token_usage,
         "cost_estimate": cost_estimate,
         "safe_mode": safe_mode,
@@ -667,6 +683,51 @@ def create_app(
     app = Flask(__name__, template_folder=str(template_dir))
     app.secret_key = os.environ.get("CHRISTOPHE_WEB_SECRET", "christophe-dev-secret")
     app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024  # 512 MB uploads
+
+    brand_name = "Ernest"
+    brand_surname = "Christophe"
+    brand_context = {
+        "brand_name": brand_name,
+        "brand_surname": brand_surname,
+        "brand_full": f"{brand_name} {brand_surname}".strip(),
+    }
+
+    @app.context_processor
+    def inject_brand() -> Dict[str, Any]:
+        return dict(brand_context)
+
+    def _interpret_flag(value: Optional[str]) -> Optional[bool]:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if not normalized:
+            return None
+        if normalized in {"1", "true", "yes", "on", "enabled"}:
+            return True
+        if normalized in {"0", "false", "no", "off", "disabled"}:
+            return False
+        return None
+
+    raw_whitelist = os.environ.get("CHRISTOPHE_PASSPHRASE_WHITELIST", "")
+    passphrase_whitelist = {
+        candidate.strip()
+        for candidate in re.split(r"[,\n;]", raw_whitelist)
+        if candidate and candidate.strip()
+    }
+    whitelist_override = _interpret_flag(
+        os.environ.get("CHRISTOPHE_PASSPHRASE_WHITELIST_ENABLED")
+    )
+    whitelist_enabled = bool(passphrase_whitelist)
+    if whitelist_override is not None:
+        whitelist_enabled = bool(passphrase_whitelist) and whitelist_override
+
+    app.config["PASSPHRASE_WHITELIST_ENABLED"] = whitelist_enabled
+    app.config["PASSPHRASE_WHITELIST"] = passphrase_whitelist
+
+    def _is_passphrase_allowed(candidate: str) -> bool:
+        if not whitelist_enabled:
+            return True
+        return candidate in passphrase_whitelist
 
     llm_service = llm or LLMService(_resolved_profiles())
     cache_manager = cache or CacheManager(Path(".cache/migration_cache.db"))
@@ -719,6 +780,7 @@ def create_app(
             "scaffolding_blueprint": migration.get("scaffolding_blueprint"),
             "scaffolding_stubs": migration.get("scaffolding_stubs"),
             "compatibility": migration.get("compatibility"),
+            "containerization": migration.get("containerization"),
             "pagination": migration.get("pagination"),
             "refinement": migration.get("refinement"),
             "error": None,
@@ -914,11 +976,21 @@ def create_app(
             if not passphrase:
                 errors.append("Passphrase is required.")
             else:
-                auth_result = user_store.authenticate(passphrase)
-                session["user_id"] = auth_result["user_id"]
-                session["token"] = auth_result["token"]
-                return redirect(url_for("index"))
-        return render_template("login.html", errors=errors)
+                if not _is_passphrase_allowed(passphrase):
+                    app.logger.warning("Rejected login attempt with non-whitelisted passphrase")
+                    errors.append(
+                        "Passphrase is not authorised for this preview."
+                    )
+                else:
+                    auth_result = user_store.authenticate(passphrase)
+                    session["user_id"] = auth_result["user_id"]
+                    session["token"] = auth_result["token"]
+                    return redirect(url_for("index"))
+        return render_template(
+            "login.html",
+            errors=errors,
+            whitelist_active=whitelist_enabled,
+        )
 
     @app.route("/", methods=["GET", "POST"])
     def index() -> Any:
@@ -1050,7 +1122,15 @@ def create_app(
         )
         if not passphrase:
             return ({"error": "passphrase is required"}, 400)
-        auth_result = user_store.authenticate(passphrase.strip())
+        sanitized = passphrase.strip()
+        if not sanitized:
+            return ({"error": "passphrase is required"}, 400)
+        if not _is_passphrase_allowed(sanitized):
+            app.logger.warning(
+                "Rejected API token request with non-whitelisted passphrase"
+            )
+            return ({"error": "passphrase not authorised"}, 403)
+        auth_result = user_store.authenticate(sanitized)
         return (
             {
                 "user_id": auth_result["user_id"],
