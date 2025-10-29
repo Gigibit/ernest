@@ -2,21 +2,26 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>{{ brand_name|capitalize }} {{ brand_surname|capitalize }} Migration Studio</title>
+    <title>{{ brand_name }} {{ brand_tagline }}</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/ernest-mark.svg') }}">
     <style>
         :root {
-            color-scheme: light dark;
-            --ink: #020714;
-            --canvas: radial-gradient(circle at 10% 10%, rgba(8, 13, 28, 0.96) 0%, rgba(3, 7, 18, 0.98) 45%, #01030a 100%);
-            --magenta: #ff2d92;
-            --blue: #1fb0ff;
-            --midnight: #0b132d;
-            --surface: rgba(5, 11, 24, 0.78);
-            --card: rgba(250, 253, 255, 0.98);
-            --muted: #96a4c8;
-            --border: rgba(31, 176, 255, 0.25);
-            --glow: 0 35px 75px rgba(2, 9, 24, 0.42);
-            --radius: 26px;
+            color-scheme: only light;
+            --ink: #0e1b2a;
+            --ink-soft: #244462;
+            --canvas: #f4f7fc;
+            --canvas-accent: radial-gradient(circle at 18% 22%, rgba(58, 166, 233, 0.14), transparent 65%);
+            --surface: #ffffff;
+            --surface-alt: #f0f6fb;
+            --card: #ffffff;
+            --muted: #5a748d;
+            --border: rgba(30, 87, 122, 0.18);
+            --border-strong: rgba(14, 27, 42, 0.24);
+            --blue: #3aa6e9;
+            --blue-dark: #1c6fb2;
+            --accent: #3aa6e9;
+            --glow: 0 28px 60px rgba(14, 27, 42, 0.14);
+            --radius: 24px;
         }
 
         *, *::before, *::after { box-sizing: border-box; }
@@ -26,7 +31,7 @@
             min-height: 100vh;
             font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, sans-serif;
             background: var(--canvas);
-            color: #e2f2ff;
+            color: var(--ink);
             padding: 42px 32px 56px;
             position: relative;
             overflow-x: hidden;
@@ -44,15 +49,15 @@
         }
 
         body::before {
-            top: -160px;
-            right: -140px;
-            background: radial-gradient(circle, rgba(31, 176, 255, 0.65), transparent 68%);
+            top: -180px;
+            right: -160px;
+            background: radial-gradient(circle, rgba(58, 166, 233, 0.28), transparent 70%);
         }
 
         body::after {
-            bottom: -160px;
-            left: -120px;
-            background: radial-gradient(circle, rgba(255, 45, 146, 0.5), transparent 70%);
+            bottom: -200px;
+            left: -160px;
+            background: radial-gradient(circle, rgba(14, 27, 42, 0.12), transparent 70%);
         }
 
         .layout {
@@ -68,7 +73,7 @@
             content: "";
             position: absolute;
             inset: -24px;
-            background: radial-gradient(circle at 30% 20%, rgba(31, 176, 255, 0.18), transparent 55%);
+            background: var(--canvas-accent);
             filter: blur(2px);
             z-index: -1;
         }
@@ -76,7 +81,7 @@
         .portal-header {
             background: var(--surface);
             border-radius: var(--radius);
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--border);
             padding: 36px 40px;
             display: flex;
             gap: 32px;
@@ -89,29 +94,33 @@
             margin: 0;
             font-size: clamp(2.2rem, 3vw, 2.8rem);
             letter-spacing: -0.03em;
-            color: #f8fbff;
-        }
-
-        .portal-header h1 span {
-            color: var(--magenta);
+            color: var(--ink);
         }
 
         .portal-header p {
             margin: 12px 0 0;
-            color: rgba(226, 242, 255, 0.82);
+            color: var(--muted);
             max-width: 540px;
             line-height: 1.6;
+        }
+
+        .portal-tagline {
+            margin: 6px 0 0;
+            font-size: 0.95rem;
+            letter-spacing: 0.28em;
+            text-transform: uppercase;
+            color: var(--muted);
         }
 
         .brand-icon {
             width: 92px;
             height: 92px;
             border-radius: 28px;
-            background: rgba(2, 6, 18, 0.75);
+            background: var(--surface-alt);
             display: grid;
             place-items: center;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            box-shadow: 0 24px 48px rgba(1, 6, 20, 0.55);
+            border: 1px solid var(--border);
+            box-shadow: 0 24px 48px rgba(14, 27, 42, 0.12);
             flex-shrink: 0;
         }
 
@@ -122,7 +131,7 @@
 
         .account {
             text-align: right;
-            color: rgba(226, 242, 255, 0.82);
+            color: var(--muted);
             display: flex;
             flex-direction: column;
             gap: 12px;
@@ -130,8 +139,8 @@
         }
 
         .account code {
-            background: rgba(31, 176, 255, 0.16);
-            color: #e2f2ff;
+            background: rgba(58, 166, 233, 0.16);
+            color: var(--ink);
             border-radius: 12px;
             padding: 6px 12px;
             font-family: 'Fira Code', 'Source Code Pro', monospace;
@@ -139,12 +148,12 @@
         }
 
         .logout {
-            color: rgba(255, 255, 255, 0.78);
+            color: var(--blue-dark);
             text-decoration: none;
             font-weight: 600;
         }
 
-        .logout:hover { color: #fff; }
+        .logout:hover { color: var(--blue); }
 
         .workspace-grid {
             display: grid;
@@ -152,22 +161,23 @@
         }
 
         .callout {
-            background: rgba(255, 255, 255, 0.08);
+            background: var(--surface);
             border-radius: var(--radius);
-            border: 1px solid rgba(31, 176, 255, 0.25);
+            border: 1px solid var(--border);
             padding: 24px 28px;
             display: flex;
             gap: 18px;
             align-items: flex-start;
+            box-shadow: 0 20px 40px rgba(14, 27, 42, 0.08);
         }
 
         .callout strong {
-            color: var(--blue);
+            color: var(--blue-dark);
         }
 
         .callout p {
             margin: 0;
-            color: rgba(226, 242, 255, 0.78);
+            color: var(--muted);
             line-height: 1.6;
         }
 
@@ -176,7 +186,7 @@
             border-radius: var(--radius);
             padding: 38px 40px;
             border: 1px solid var(--border);
-            box-shadow: 0 28px 60px rgba(9, 16, 40, 0.28);
+            box-shadow: 0 28px 60px rgba(14, 27, 42, 0.12);
             color: #0f172a;
             display: grid;
             gap: 26px;
@@ -244,7 +254,7 @@
         .checkbox-label input {
             width: 22px;
             height: 22px;
-            accent-color: var(--magenta);
+            accent-color: var(--blue);
         }
 
         .hint {
@@ -255,7 +265,7 @@
 
         .drop-zone {
             grid-column: 1 / -1;
-            border: 2px dashed rgba(31, 176, 255, 0.55);
+            border: 2px dashed rgba(58, 166, 233, 0.55);
             border-radius: 20px;
             padding: 44px;
             text-align: center;
@@ -273,15 +283,15 @@
             position: absolute;
             inset: 12px;
             border-radius: 16px;
-            border: 1px dashed rgba(31, 176, 255, 0.25);
+            border: 1px dashed rgba(58, 166, 233, 0.28);
             pointer-events: none;
         }
 
         .drop-zone.dragover {
-            background: rgba(31, 176, 255, 0.18);
-            border-color: var(--magenta);
+            background: rgba(58, 166, 233, 0.18);
+            border-color: var(--blue-dark);
             transform: translateY(-2px);
-            box-shadow: 0 18px 45px rgba(31, 176, 255, 0.28);
+            box-shadow: 0 18px 45px rgba(58, 166, 233, 0.25);
         }
 
         button {
@@ -291,69 +301,69 @@
             padding: 16px;
             font-size: 1.05rem;
             font-weight: 600;
-            background: linear-gradient(120deg, var(--magenta), var(--blue));
+            background: linear-gradient(120deg, var(--blue-dark), var(--blue));
             color: #fff;
             cursor: pointer;
-            box-shadow: 0 24px 48px rgba(255, 45, 146, 0.32);
+            box-shadow: 0 24px 48px rgba(58, 166, 233, 0.3);
             transition: transform 0.18s ease, box-shadow 0.22s ease;
         }
 
         button:hover {
             transform: translateY(-2px);
-            box-shadow: 0 30px 62px rgba(31, 176, 255, 0.35);
+            box-shadow: 0 30px 62px rgba(28, 112, 178, 0.35);
         }
 
         button:focus-visible {
-            outline: 3px solid rgba(31, 176, 255, 0.6);
+            outline: 3px solid rgba(58, 166, 233, 0.55);
             outline-offset: 4px;
         }
 
         .messages { grid-column: 1 / -1; }
 
         .error {
-            background: rgba(254, 226, 226, 0.96);
-            color: #b91c1c;
+            background: rgba(255, 238, 240, 0.96);
+            color: #b42335;
             border-radius: 14px;
             padding: 14px 18px;
-            border: 1px solid rgba(239, 68, 68, 0.35);
+            border: 1px solid rgba(218, 70, 93, 0.35);
         }
 
         .error ul { margin: 0; padding-left: 18px; }
 
         .toast {
-            background: rgba(20, 30, 58, 0.75);
+            background: var(--surface);
             border-radius: var(--radius);
-            border: 1px solid rgba(31, 176, 255, 0.35);
+            border: 1px solid var(--border);
             padding: 22px 26px;
             display: flex;
             gap: 18px;
             align-items: center;
-            box-shadow: var(--glow);
+            box-shadow: 0 18px 40px rgba(14, 27, 42, 0.12);
         }
 
         .toast-icon {
             width: 42px;
             height: 42px;
             border-radius: 50%;
-            background: linear-gradient(135deg, var(--magenta), var(--blue));
+            background: linear-gradient(135deg, var(--blue-dark), var(--blue));
             display: grid;
             place-items: center;
             font-size: 1.4rem;
             color: #fff;
-            box-shadow: 0 0 0 8px rgba(31, 176, 255, 0.22);
+            box-shadow: 0 0 0 8px rgba(58, 166, 233, 0.18);
         }
 
         .toast-title {
             font-weight: 700;
-            color: #f8fbff;
+            color: var(--ink);
             margin-bottom: 4px;
         }
 
-        .toast-text { color: rgba(226, 242, 255, 0.85); }
+        .toast-text { color: var(--muted); }
 
         .toast-meta {
             font-size: 0.85rem;
-            color: rgba(148, 197, 255, 0.72);
+            color: rgba(36, 68, 98, 0.65);
             margin-top: 6px;
         }
 
@@ -365,15 +375,15 @@
         .projects-section h2 {
             margin: 0;
             font-size: 1.4rem;
-            color: #f8fbff;
+            color: var(--ink);
         }
 
         .projects-wrapper {
             background: var(--surface);
             border-radius: var(--radius);
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--border);
             padding: 28px 30px 32px;
-            box-shadow: var(--glow);
+            box-shadow: 0 24px 48px rgba(14, 27, 42, 0.12);
         }
 
         .projects-list {
@@ -382,9 +392,9 @@
         }
 
         .project-row {
-            border: 1px solid rgba(31, 176, 255, 0.2);
+            border: 1px solid rgba(30, 87, 122, 0.18);
             border-radius: 18px;
-            background: rgba(255, 255, 255, 0.04);
+            background: var(--surface);
             overflow: hidden;
             transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
         }
@@ -394,8 +404,8 @@
         .project-row.status-failed { border-left: 6px solid #ef4444; }
 
         .project-row.expanded {
-            border-color: rgba(31, 176, 255, 0.5);
-            box-shadow: 0 18px 45px rgba(31, 176, 255, 0.25);
+            border-color: rgba(58, 166, 233, 0.4);
+            box-shadow: 0 18px 45px rgba(58, 166, 233, 0.22);
             transform: translateY(-2px);
         }
 
@@ -415,7 +425,7 @@
         }
 
         .project-header:focus-visible {
-            outline: 3px solid rgba(31, 176, 255, 0.45);
+            outline: 3px solid rgba(58, 166, 233, 0.45);
             outline-offset: -4px;
         }
 
@@ -437,12 +447,12 @@
         .status-dot.status-pending { background: #fbbf24; box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.35); }
         .status-dot.status-failed { background: #ef4444; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.35); }
 
-        .project-title { font-weight: 600; color: #f8fbff; }
-        .project-updated { color: rgba(226, 242, 255, 0.72); font-size: 0.9rem; }
+        .project-title { font-weight: 600; color: var(--ink); }
+        .project-updated { color: rgba(36, 68, 98, 0.65); font-size: 0.9rem; }
 
         .project-details {
             padding: 0 20px 20px;
-            border-top: 1px solid rgba(31, 176, 255, 0.16);
+            border-top: 1px solid rgba(30, 87, 122, 0.16);
             display: none;
         }
 
@@ -451,25 +461,25 @@
         .detail-line {
             margin-top: 12px;
             font-size: 0.95rem;
-            color: rgba(226, 242, 255, 0.78);
+            color: var(--muted);
         }
 
-        .detail-line strong { color: #f8fbff; }
+        .detail-line strong { color: var(--ink); }
 
         details.detail-collapsible {
             margin-top: 12px;
             border-radius: 14px;
-            background: rgba(0, 0, 0, 0.25);
-            border: 1px solid rgba(31, 176, 255, 0.22);
+            background: var(--surface-alt);
+            border: 1px solid rgba(30, 87, 122, 0.18);
             padding: 10px 12px;
         }
 
-        details.detail-collapsible[open] { background: rgba(0, 0, 0, 0.35); }
+        details.detail-collapsible[open] { background: var(--surface); }
 
         details.detail-collapsible summary {
             cursor: pointer;
             font-weight: 600;
-            color: #f8fbff;
+            color: var(--ink);
             display: flex;
             align-items: center;
             gap: 8px;
@@ -482,20 +492,20 @@
             content: '\u25B8';
             transition: transform 0.2s ease;
             font-size: 0.75rem;
-            color: rgba(226, 242, 255, 0.65);
+            color: rgba(36, 68, 98, 0.45);
         }
 
         details.detail-collapsible[open] summary::before { transform: rotate(90deg); }
 
         details.detail-collapsible summary:focus-visible {
-            outline: 2px solid rgba(31, 176, 255, 0.5);
+            outline: 2px solid rgba(58, 166, 233, 0.5);
             outline-offset: 4px;
         }
 
         .detail-block {
             margin: 12px 0 0;
-            background: rgba(5, 11, 24, 0.85);
-            color: #e2f2ff;
+            background: var(--surface-alt);
+            color: var(--ink);
             padding: 12px 14px;
             border-radius: 12px;
             overflow-x: auto;
@@ -508,7 +518,7 @@
             margin-top: 14px;
             padding: 10px 16px;
             border-radius: 12px;
-            background: linear-gradient(120deg, var(--magenta), var(--blue));
+            background: linear-gradient(120deg, var(--blue-dark), var(--blue));
             color: #fff;
             text-decoration: none;
             font-weight: 600;
@@ -517,14 +527,14 @@
         .project-details .download:hover { opacity: 0.9; }
 
         .empty {
-            color: rgba(226, 242, 255, 0.6);
+            color: rgba(36, 68, 98, 0.6);
             font-style: italic;
         }
 
         footer {
             margin-top: 12px;
             text-align: center;
-            color: rgba(226, 242, 255, 0.65);
+            color: rgba(36, 68, 98, 0.65);
             font-size: 0.9rem;
         }
 
@@ -546,10 +556,11 @@
     <div class="layout">
         <header class="portal-header">
             <div class="brand-icon">
-                <img src="{{ url_for('static', filename='img/ernest-symbol.svg') }}" alt="{{ brand_name|capitalize }} {{ brand_surname|capitalize }} emblem">
+                <img src="{{ url_for('static', filename='img/ernest-mark.svg') }}" alt="{{ brand_name }} logo">
             </div>
             <div>
-                <h1>{{ brand_name|capitalize }} <span>{{ brand_surname|capitalize }}</span> migration studio</h1>
+                <h1>{{ brand_name }}</h1>
+                <p class="portal-tagline">{{ brand_tagline }}</p>
                 <p>Command migrations from SAP ECC to SAP S/4HANA with iterative refinement, blueprint scaffolding, and compatibility research orchestrated in one place.</p>
             </div>
             <div class="account">
@@ -564,13 +575,13 @@
         <section class="workspace-grid">
             <div class="callout">
                 <strong>Enterprise PoC</strong>
-                <p>Magenta heritage preserved, Ernest blue refinements engaged. Queue archives safely while the platform stages pagination, guardrails, and blueprint feedback automatically.</p>
+                <p>ERNEST keeps a watchful eye on every interface. Queue archives safely while the studio stages pagination, guardrails, and blueprint feedback automatically.</p>
             </div>
 
             <div class="form-card">
                 <div>
                     <h2>Queue a migration</h2>
-                    <p class="form-description">Upload a legacy transport ZIP, declare your target, and Ernest {{ brand_surname|capitalize }} will handle pagination, refinement, and scaffold generation.</p>
+                    <p class="form-description">Upload a legacy transport ZIP, declare your target, and {{ brand_name }} will handle pagination, refinement, and scaffold generation.</p>
                 </div>
                 <form method="post" enctype="multipart/form-data">
                     <div>
@@ -803,7 +814,7 @@
         </section>
 
         <footer>
-            Powered by {{ brand_name|capitalize }} {{ brand_surname|capitalize }} — preserving the magenta core while refining migrations with Ernest blue insight.
+            Powered by {{ brand_name }} — the migration studio that keeps a clear eye on every blueprint.
         </footer>
     </div>
 

@@ -13,6 +13,10 @@ from typing import Any, Dict, Iterable, Mapping, MutableMapping, Sequence
 from .strategies import DEFAULT_STRATEGIES, TranslationStrategy
 
 
+ENV_PREFIX = "ERNEST"
+LEGACY_PREFIX = "CHRISTOPHE"
+
+
 class SourceMigrator:
     """Translate source artefacts by delegating to specialised strategies."""
 
@@ -550,57 +554,63 @@ class SourceMigrator:
     def _load_auto_config() -> Dict[str, int]:
         env = os.environ
 
-        def _positive_int(name: str, default: int) -> int:
-            raw = env.get(name)
+        def _positive_int(suffix: str, default: int) -> int:
+            primary = f"{ENV_PREFIX}_{suffix}"
+            legacy = f"{LEGACY_PREFIX}_{suffix}"
+            raw = env.get(primary)
+            source = primary
+            if raw is None:
+                raw = env.get(legacy)
+                source = legacy
             if raw is None:
                 return default
             try:
                 value = int(raw)
             except ValueError:
                 logging.warning(
-                    "Invalid value for %s=%s; falling back to %d", name, raw, default
+                    "Invalid value for %s=%s; falling back to %d", source, raw, default
                 )
                 return default
             if value <= 0:
                 logging.warning(
-                    "%s must be > 0, received %d; using %d", name, value, default
+                    "%s must be > 0, received %d; using %d", source, value, default
                 )
                 return default
             return value
 
         return {
             "small_line_threshold": _positive_int(
-                "CHRISTOPHE_AUTO_PAGE_SMALL_LINES", 600
+                "AUTO_PAGE_SMALL_LINES", 600
             ),
             "medium_line_threshold": _positive_int(
-                "CHRISTOPHE_AUTO_PAGE_MEDIUM_LINES", 1500
+                "AUTO_PAGE_MEDIUM_LINES", 1500
             ),
             "large_line_threshold": _positive_int(
-                "CHRISTOPHE_AUTO_PAGE_LARGE_LINES", 3500
+                "AUTO_PAGE_LARGE_LINES", 3500
             ),
             "huge_line_threshold": _positive_int(
-                "CHRISTOPHE_AUTO_PAGE_HUGE_LINES", 6000
+                "AUTO_PAGE_HUGE_LINES", 6000
             ),
             "medium_page_chunks": _positive_int(
-                "CHRISTOPHE_AUTO_PAGE_MEDIUM_CHUNKS", 4
+                "AUTO_PAGE_MEDIUM_CHUNKS", 4
             ),
             "large_page_chunks": _positive_int(
-                "CHRISTOPHE_AUTO_PAGE_LARGE_CHUNKS", 6
+                "AUTO_PAGE_LARGE_CHUNKS", 6
             ),
             "huge_page_chunks": _positive_int(
-                "CHRISTOPHE_AUTO_PAGE_HUGE_CHUNKS", 8
+                "AUTO_PAGE_HUGE_CHUNKS", 8
             ),
             "massive_page_chunks": _positive_int(
-                "CHRISTOPHE_AUTO_PAGE_MASSIVE_CHUNKS", 10
+                "AUTO_PAGE_MASSIVE_CHUNKS", 10
             ),
             "project_large_file_count": _positive_int(
-                "CHRISTOPHE_AUTO_PAGE_PROJECT_FILES", 40
+                "AUTO_PAGE_PROJECT_FILES", 40
             ),
             "project_large_total_lines": _positive_int(
-                "CHRISTOPHE_AUTO_PAGE_PROJECT_LINES", 60000
+                "AUTO_PAGE_PROJECT_LINES", 60000
             ),
             "project_large_page_chunks": _positive_int(
-                "CHRISTOPHE_AUTO_PAGE_PROJECT_CHUNKS", 3
+                "AUTO_PAGE_PROJECT_CHUNKS", 3
             ),
         }
 
@@ -608,21 +618,27 @@ class SourceMigrator:
     def _load_auto_refine_config() -> Dict[str, int]:
         env = os.environ
 
-        def _bounded_int(name: str, default: int, minimum: int = 0) -> int:
-            raw = env.get(name)
+        def _bounded_int(suffix: str, default: int, minimum: int = 0) -> int:
+            primary = f"{ENV_PREFIX}_{suffix}"
+            legacy = f"{LEGACY_PREFIX}_{suffix}"
+            raw = env.get(primary)
+            source = primary
+            if raw is None:
+                raw = env.get(legacy)
+                source = legacy
             if raw is None:
                 return default
             try:
                 value = int(raw)
             except ValueError:
                 logging.warning(
-                    "Invalid value for %s=%s; falling back to %d", name, raw, default
+                    "Invalid value for %s=%s; falling back to %d", source, raw, default
                 )
                 return default
             if value < minimum:
                 logging.warning(
                     "%s must be >= %d, received %d; using %d",
-                    name,
+                    source,
                     minimum,
                     value,
                     default,
@@ -631,12 +647,12 @@ class SourceMigrator:
             return value
 
         return {
-            "base_passes": _bounded_int("CHRISTOPHE_AUTO_REFINE_BASE", 1),
-            "complex_passes": _bounded_int("CHRISTOPHE_AUTO_REFINE_COMPLEX", 2),
-            "line_threshold": _bounded_int("CHRISTOPHE_AUTO_REFINE_LINES", 2200, 1),
-            "chunk_threshold": _bounded_int("CHRISTOPHE_AUTO_REFINE_CHUNKS", 6, 1),
+            "base_passes": _bounded_int("AUTO_REFINE_BASE", 1),
+            "complex_passes": _bounded_int("AUTO_REFINE_COMPLEX", 2),
+            "line_threshold": _bounded_int("AUTO_REFINE_LINES", 2200, 1),
+            "chunk_threshold": _bounded_int("AUTO_REFINE_CHUNKS", 6, 1),
             "project_line_threshold": _bounded_int(
-                "CHRISTOPHE_AUTO_REFINE_PROJECT_LINES", 80000, 1
+                "AUTO_REFINE_PROJECT_LINES", 80000, 1
             ),
         }
 

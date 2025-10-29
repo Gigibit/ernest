@@ -12,7 +12,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Sequence
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from analysis.compatibility_agent import CompatibilitySearchAgent
 from analysis.dependency_agent import DependencyAnalysisAgent
@@ -37,6 +37,10 @@ from planning.containerization_agent import ContainerizationAgent
 from planning.scaffolding_blueprint_agent import ScaffoldingBlueprintAgent
 from planning.planning_agent import PlanningAgent
 from scaffolding.scaffolding_agent import ScaffoldingAgent
+
+
+ENV_PREFIX = "ERNEST"
+LEGACY_PREFIX = "CHRISTOPHE"
 
 
 DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
@@ -146,28 +150,62 @@ def _coerce_markup(value: Optional[str], default: float) -> float:
     return rate
 
 
+def _resolve_env(
+    primary: str,
+    *,
+    legacy: Optional[str] = None,
+) -> Tuple[Optional[str], str]:
+    value = os.environ.get(primary)
+    if value is not None:
+        return value, primary
+    if legacy:
+        legacy_value = os.environ.get(legacy)
+        if legacy_value is not None:
+            return legacy_value, legacy
+    return None, primary
+
+
 def _cost_configuration() -> Dict[str, Any]:
+    resource_value, resource_env = _resolve_env(
+        f"{ENV_PREFIX}_RESOURCE_COST",
+        legacy=f"{LEGACY_PREFIX}_RESOURCE_COST",
+    )
     resource_cost = _coerce_float(
-        os.environ.get("CHRISTOPHE_RESOURCE_COST"),
+        resource_value,
         DEFAULT_RESOURCE_COST,
-        "CHRISTOPHE_RESOURCE_COST",
+        resource_env,
     )
 
-    markup_source = os.environ.get("CHRISTOPHE_COST_MARKUP") or os.environ.get(
-        "CHRISTOPHE_MARKUP_RATE"
+    markup_value, _ = _resolve_env(
+        f"{ENV_PREFIX}_COST_MARKUP",
+        legacy=f"{LEGACY_PREFIX}_COST_MARKUP",
     )
-    markup_rate = _coerce_markup(markup_source, DEFAULT_MARKUP_RATE)
+    if markup_value is None:
+        markup_value, _ = _resolve_env(
+            f"{ENV_PREFIX}_MARKUP_RATE",
+            legacy=f"{LEGACY_PREFIX}_MARKUP_RATE",
+        )
+    markup_rate = _coerce_markup(markup_value, DEFAULT_MARKUP_RATE)
 
-    raw_time = os.environ.get("CHRISTOPHE_RESOURCE_TIME_LEFT")
+    raw_time, _ = _resolve_env(
+        f"{ENV_PREFIX}_RESOURCE_TIME_LEFT",
+        legacy=f"{LEGACY_PREFIX}_RESOURCE_TIME_LEFT",
+    )
     if raw_time is None:
         time_remaining = DEFAULT_RESOURCE_CONTEXT
     else:
         stripped_time = raw_time.strip()
         time_remaining = stripped_time or DEFAULT_RESOURCE_CONTEXT
 
-    raw_note = os.environ.get("CHRISTOPHE_RESOURCE_CONTEXT") or os.environ.get(
-        "CHRISTOPHE_RESOURCE_NOTE"
+    raw_note, _ = _resolve_env(
+        f"{ENV_PREFIX}_RESOURCE_CONTEXT",
+        legacy=f"{LEGACY_PREFIX}_RESOURCE_CONTEXT",
     )
+    if raw_note is None:
+        raw_note, _ = _resolve_env(
+            f"{ENV_PREFIX}_RESOURCE_NOTE",
+            legacy=f"{LEGACY_PREFIX}_RESOURCE_NOTE",
+        )
     note = raw_note.strip() if raw_note and raw_note.strip() else None
 
     return {
@@ -383,7 +421,7 @@ def run_migration(
     scaffolding_blueprint: Dict[str, Any] = {}
     stub_results: list[Dict[str, Any]] = []
 
-    with tempfile.TemporaryDirectory(prefix="christophe_") as tmp:
+    with tempfile.TemporaryDirectory(prefix="ernest_") as tmp:
         temp_dir = Path(tmp)
         logging.info("Unpacking archive %s into %s", zip_path, temp_dir)
         secure_unzip(zip_path, temp_dir)
@@ -655,6 +693,7 @@ def run_migration(
         "safe_mode": safe_mode,
         "pagination": pagination_report,
         "refinement": refinement_report,
+        "source_archive": str(zip_path.resolve()),
     }
 
 
@@ -681,15 +720,18 @@ def create_app(
 
     template_dir = Path(__file__).resolve().with_name("templates")
     app = Flask(__name__, template_folder=str(template_dir))
-    app.secret_key = os.environ.get("CHRISTOPHE_WEB_SECRET", "christophe-dev-secret")
+    secret_value, _ = _resolve_env(
+        f"{ENV_PREFIX}_WEB_SECRET",
+        legacy=f"{LEGACY_PREFIX}_WEB_SECRET",
+    )
+    app.secret_key = secret_value or "ernest-dev-secret"
     app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024  # 512 MB uploads
 
-    brand_name = "Ernest"
-    brand_surname = "Christophe"
+    brand_name = "ERNEST"
+    brand_tagline = "Migration Studio"
     brand_context = {
         "brand_name": brand_name,
-        "brand_surname": brand_surname,
-        "brand_full": f"{brand_name} {brand_surname}".strip(),
+        "brand_tagline": brand_tagline,
     }
 
     @app.context_processor
@@ -708,15 +750,21 @@ def create_app(
             return False
         return None
 
-    raw_whitelist = os.environ.get("CHRISTOPHE_PASSPHRASE_WHITELIST", "")
+    raw_whitelist, _ = _resolve_env(
+        f"{ENV_PREFIX}_PASSPHRASE_WHITELIST",
+        legacy=f"{LEGACY_PREFIX}_PASSPHRASE_WHITELIST",
+    )
+    raw_whitelist = raw_whitelist or ""
     passphrase_whitelist = {
         candidate.strip()
         for candidate in re.split(r"[,\n;]", raw_whitelist)
         if candidate and candidate.strip()
     }
-    whitelist_override = _interpret_flag(
-        os.environ.get("CHRISTOPHE_PASSPHRASE_WHITELIST_ENABLED")
+    whitelist_toggle, _ = _resolve_env(
+        f"{ENV_PREFIX}_PASSPHRASE_WHITELIST_ENABLED",
+        legacy=f"{LEGACY_PREFIX}_PASSPHRASE_WHITELIST_ENABLED",
     )
+    whitelist_override = _interpret_flag(whitelist_toggle)
     whitelist_enabled = bool(passphrase_whitelist)
     if whitelist_override is not None:
         whitelist_enabled = bool(passphrase_whitelist) and whitelist_override
@@ -731,9 +779,20 @@ def create_app(
 
     llm_service = llm or LLMService(_resolved_profiles())
     cache_manager = cache or CacheManager(Path(".cache/migration_cache.db"))
-    executor = ThreadPoolExecutor(
-        max_workers=int(os.environ.get("CHRISTOPHE_WORKERS", "2"))
+    worker_value, worker_env = _resolve_env(
+        f"{ENV_PREFIX}_WORKERS",
+        legacy=f"{LEGACY_PREFIX}_WORKERS",
     )
+    try:
+        max_workers = int(worker_value) if worker_value else 2
+    except ValueError:
+        logging.warning(
+            "Unable to parse %s=%s as integer; using 2",
+            worker_env,
+            worker_value,
+        )
+        max_workers = 2
+    executor = ThreadPoolExecutor(max_workers=max_workers)
 
     base_output_root = output_root or Path("output_project")
     web_output_root = base_output_root / "web"
@@ -741,7 +800,11 @@ def create_app(
     web_output_root.mkdir(parents=True, exist_ok=True)
     api_output_root.mkdir(parents=True, exist_ok=True)
 
-    store_path = Path(os.environ.get("CHRISTOPHE_USER_STORE", ".cache/users.json"))
+    store_value, _ = _resolve_env(
+        f"{ENV_PREFIX}_USER_STORE",
+        legacy=f"{LEGACY_PREFIX}_USER_STORE",
+    )
+    store_path = Path(store_value or ".cache/users.json")
     user_store = UserStore(store_path)
 
     def _timestamp() -> str:
@@ -758,12 +821,50 @@ def create_app(
         ) or req.values.get("auth_token") or req.values.get("token") or req.values.get("access_token")
 
     def _finalise_success(user_id: str, project_id: str, migration: Dict[str, Any]) -> Dict[str, Any]:
-        archive_file = shutil.make_archive(
-            str(migration["target_path"]),
-            "zip",
-            root_dir=migration["target_path"],
-        )
-        archive_path = Path(archive_file)
+        target_path = Path(migration["target_path"])
+        archive_stem = f"ernst_{project_id}_archive"
+        source_archive = migration.get("source_archive")
+
+        final_path: Optional[Path] = None
+        with tempfile.TemporaryDirectory(prefix="ernest_bundle_") as bundle_tmp:
+            bundle_root = Path(bundle_tmp) / archive_stem
+            input_dir = bundle_root / "input_project"
+            output_dir = bundle_root / "output_project"
+            output_dir.parent.mkdir(parents=True, exist_ok=True)
+
+            shutil.copytree(target_path, output_dir)
+
+            if source_archive:
+                source_path = Path(source_archive)
+                if source_path.exists():
+                    input_dir.mkdir(parents=True, exist_ok=True)
+                    try:
+                        secure_unzip(source_path, input_dir)
+                    except Exception as exc:  # noqa: BLE001
+                        logging.warning(
+                            "Unable to include source archive %s: %s",
+                            source_path,
+                            exc,
+                        )
+                else:
+                    logging.warning(
+                        "Source archive %s missing; creating empty input snapshot",
+                        source_archive,
+                    )
+                    input_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                input_dir.mkdir(parents=True, exist_ok=True)
+
+            archive_file = shutil.make_archive(
+                str(bundle_root),
+                "zip",
+                root_dir=bundle_root.parent,
+                base_dir=bundle_root.name,
+            )
+            final_path = target_path.parent / Path(archive_file).name
+            Path(archive_file).replace(final_path)
+
+        archive_path = final_path or target_path.with_suffix(".zip")
         metadata = {
             "status": "completed",
             "completed_at": _timestamp(),

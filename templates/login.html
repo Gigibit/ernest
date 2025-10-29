@@ -2,22 +2,27 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>Access Ernest Christophe</title>
+    <title>{{ brand_name }} {{ brand_tagline }}</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/ernest-mark.svg') }}">
     <style>
         :root {
-            color-scheme: light dark;
-            --ink: #050b18;
-            --canvas: radial-gradient(circle at 15% 20%, rgba(11, 17, 34, 0.92) 0%, rgba(5, 8, 16, 0.96) 40%, #01030a 100%);
-            --canvas-accent: linear-gradient(135deg, rgba(31, 176, 255, 0.22), rgba(255, 45, 146, 0.32));
-            --surface: rgba(5, 10, 22, 0.75);
-            --surface-strong: rgba(252, 252, 255, 0.96);
-            --magenta: #ff2d92;
-            --blue: #1fb0ff;
-            --violet: #1e2a55;
-            --text-hero: #e2f2ff;
-            --text-soft: #c2d8ff;
-            --card-border: rgba(31, 176, 255, 0.28);
-            --shadow: 0 40px 80px rgba(2, 9, 28, 0.45);
+            color-scheme: only light;
+            --ink: #0e1b2a;
+            --ink-soft: #244462;
+            --canvas: #f4f7fc;
+            --canvas-accent: radial-gradient(circle at 20% 20%, rgba(58, 166, 233, 0.18), transparent 65%);
+            --surface: #ffffff;
+            --surface-subtle: #eff5fb;
+            --surface-strong: #ffffff;
+            --blue: #3aa6e9;
+            --blue-dark: #1c6fb2;
+            --iris: #0e1b2a;
+            --muted: #5a748d;
+            --magenta: #3aa6e9;
+            --text-hero: #0e1b2a;
+            --text-soft: #5a748d;
+            --card-border: rgba(30, 87, 122, 0.16);
+            --shadow: 0 32px 70px rgba(14, 27, 42, 0.12);
         }
 
         *, *::before, *::after { box-sizing: border-box; }
@@ -27,7 +32,7 @@
             min-height: 100vh;
             font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, sans-serif;
             background: var(--canvas);
-            color: var(--text-hero);
+            color: var(--ink);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -42,24 +47,23 @@
             position: absolute;
             border-radius: 50%;
             filter: blur(0px);
-            mix-blend-mode: screen;
-            opacity: 0.65;
+            opacity: 0.7;
         }
 
         body::before {
             width: 420px;
             height: 420px;
-            top: -120px;
+            top: -160px;
             left: -140px;
-            background: radial-gradient(circle, rgba(255, 45, 146, 0.75), transparent 70%);
+            background: radial-gradient(circle, rgba(58, 166, 233, 0.35), transparent 70%);
         }
 
         body::after {
             width: 360px;
             height: 360px;
-            bottom: -100px;
-            right: -80px;
-            background: radial-gradient(circle, rgba(31, 176, 255, 0.7), transparent 65%);
+            bottom: -140px;
+            right: -120px;
+            background: radial-gradient(circle, rgba(14, 27, 42, 0.12), transparent 65%);
         }
 
         main {
@@ -74,7 +78,7 @@
 
         .brand-panel {
             background: var(--surface);
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--card-border);
             border-radius: 28px;
             padding: 48px;
             position: relative;
@@ -90,9 +94,8 @@
             content: "";
             position: absolute;
             inset: 0;
-            background: var(--canvas-accent);
+            background: linear-gradient(135deg, rgba(58, 166, 233, 0.14), rgba(255, 255, 255, 0));
             border-radius: inherit;
-            opacity: 0.25;
             pointer-events: none;
         }
 
@@ -107,11 +110,11 @@
             width: 90px;
             height: 90px;
             border-radius: 28px;
-            background: rgba(7, 12, 26, 0.8);
+            background: var(--surface-subtle);
             display: grid;
             place-items: center;
-            box-shadow: 0 20px 45px rgba(3, 11, 32, 0.5);
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 18px 40px rgba(14, 27, 42, 0.15);
+            border: 1px solid var(--card-border);
         }
 
         .brand-logo img {
@@ -123,22 +126,24 @@
             margin: 0;
             font-size: clamp(2.4rem, 2.8vw, 3rem);
             letter-spacing: -0.03em;
-            color: var(--text-hero);
+            color: var(--ink);
         }
 
-        .brand-title span {
-            display: inline-block;
-            margin-left: 0.25em;
-            color: var(--magenta);
+        .brand-tagline {
+            margin: 6px 0 0;
+            font-size: 0.95rem;
+            letter-spacing: 0.28em;
+            text-transform: uppercase;
+            color: var(--muted);
         }
 
         .brand-summary {
             position: relative;
-            background: linear-gradient(120deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0));
-            border: 1px solid rgba(31, 176, 255, 0.25);
+            background: linear-gradient(120deg, rgba(58, 166, 233, 0.08), rgba(255, 255, 255, 0));
+            border: 1px solid rgba(58, 166, 233, 0.35);
             border-radius: 18px;
             padding: 20px 24px;
-            backdrop-filter: blur(12px);
+            backdrop-filter: blur(6px);
         }
 
         .brand-summary strong {
@@ -147,7 +152,7 @@
 
         .brand-summary p {
             margin: 0 0 8px;
-            color: var(--text-soft);
+            color: var(--muted);
             font-size: 0.98rem;
         }
 
@@ -164,7 +169,7 @@
             align-items: center;
             gap: 12px;
             font-size: 0.98rem;
-            color: var(--text-soft);
+            color: var(--muted);
         }
 
         .brand-points li::before {
@@ -172,8 +177,8 @@
             width: 12px;
             height: 12px;
             border-radius: 50%;
-            background: linear-gradient(135deg, var(--magenta), var(--blue));
-            box-shadow: 0 0 16px rgba(31, 176, 255, 0.35);
+            background: linear-gradient(135deg, var(--blue), var(--blue-dark));
+            box-shadow: 0 0 16px rgba(58, 166, 233, 0.25);
         }
 
         .brand-footer {
@@ -182,7 +187,7 @@
             flex-wrap: wrap;
             gap: 12px;
             align-items: center;
-            color: rgba(255, 255, 255, 0.7);
+            color: var(--muted);
             font-size: 0.9rem;
         }
 
@@ -192,8 +197,8 @@
             gap: 8px;
             padding: 8px 14px;
             border-radius: 999px;
-            background: rgba(15, 118, 255, 0.12);
-            border: 1px solid rgba(31, 176, 255, 0.25);
+            background: rgba(58, 166, 233, 0.12);
+            border: 1px solid rgba(58, 166, 233, 0.25);
         }
 
         .form-card {
@@ -201,7 +206,7 @@
             background: var(--surface-strong);
             border-radius: 26px;
             padding: 44px 40px;
-            box-shadow: 0 24px 70px rgba(9, 13, 34, 0.25);
+            box-shadow: 0 28px 60px rgba(14, 27, 42, 0.12);
             border: 1px solid var(--card-border);
             display: flex;
             flex-direction: column;
@@ -235,8 +240,8 @@
             gap: 8px;
             padding: 6px 12px;
             border-radius: 999px;
-            background: rgba(255, 45, 146, 0.16);
-            color: #941a59;
+            background: rgba(58, 166, 233, 0.14);
+            color: var(--blue-dark);
             font-weight: 600;
             font-size: 0.85rem;
         }
@@ -270,32 +275,32 @@
             padding: 15px 18px;
             border-radius: 18px;
             border: none;
-            background: linear-gradient(120deg, var(--magenta), var(--blue));
+            background: linear-gradient(120deg, var(--blue-dark), var(--blue));
             color: #fff;
             font-size: 1.05rem;
             font-weight: 600;
             letter-spacing: 0.01em;
             cursor: pointer;
-            box-shadow: 0 20px 40px rgba(31, 176, 255, 0.35);
+            box-shadow: 0 20px 40px rgba(58, 166, 233, 0.28);
             transition: transform 0.18s ease, box-shadow 0.22s ease;
         }
 
         button:hover {
             transform: translateY(-2px);
-            box-shadow: 0 26px 55px rgba(255, 45, 146, 0.32);
+            box-shadow: 0 28px 60px rgba(28, 112, 178, 0.35);
         }
 
         button:focus-visible {
-            outline: 3px solid rgba(31, 176, 255, 0.6);
+            outline: 3px solid rgba(58, 166, 233, 0.55);
             outline-offset: 4px;
         }
 
         .error {
-            background: rgba(254, 226, 226, 0.9);
-            color: #b91c1c;
+            background: rgba(255, 238, 240, 0.92);
+            color: #b42335;
             border-radius: 14px;
             padding: 14px 18px;
-            border: 1px solid rgba(239, 68, 68, 0.35);
+            border: 1px solid rgba(218, 70, 93, 0.35);
         }
 
         .error ul {
@@ -331,12 +336,15 @@
             <div>
                 <div class="brand-header">
                     <div class="brand-logo">
-                        <img src="{{ url_for('static', filename='img/ernest-symbol.svg') }}" alt="{{ brand_name }} {{ brand_surname }} emblem">
+                        <img src="{{ url_for('static', filename='img/ernest-mark.svg') }}" alt="{{ brand_name }} logo">
                     </div>
-                    <h1 id="brand-title" class="brand-title">{{ brand_name|capitalize }} <span>{{ brand_surname|capitalize }}</span></h1>
+                    <div>
+                        <h1 id="brand-title" class="brand-title">{{ brand_name }}</h1>
+                        <p class="brand-tagline">{{ brand_tagline }}</p>
+                    </div>
                 </div>
                 <div class="brand-summary">
-                    <p><strong>SAP ECC → SAP S/4HANA</strong> readiness, architecture discovery, and blueprinting in a single cockpit. Ernest {{ brand_surname|capitalize }} keeps orchestration transparent while the AI handles the migration legwork.</p>
+                    <p><strong>SAP ECC → SAP S/4HANA</strong> readiness, architecture discovery, and blueprinting in a single cockpit. {{ brand_name }} keeps orchestration transparent while the AI handles the migration legwork.</p>
                     <ul class="brand-points">
                         <li>Visualise dependency pressure before you extract a single transport.</li>
                         <li>Stage iterative refactors with automated safety harnesses.</li>
@@ -345,8 +353,8 @@
                 </div>
             </div>
             <div class="brand-footer">
-                <span>Magenta core preserved</span>
-                <span>Refined with Ernest blue</span>
+                <span>Eye on every interface</span>
+                <span>Blueprinted with {{ brand_name }} blue</span>
                 <span>PoC portal for enterprise crews</span>
             </div>
         </section>
@@ -354,14 +362,14 @@
             <div class="form-header">
                 <div>
                     <h2 id="form-title">Access your workspace</h2>
-                    <p>Authenticate with your project passphrase to open the Ernest {{ brand_surname|capitalize }} control room.</p>
+                    <p>Authenticate with your project passphrase to open the {{ brand_name }} control room.</p>
                 </div>
                 {% if whitelist_active %}
                 <span class="access-pill" aria-live="polite">Preview whitelist</span>
                 {% endif %}
             </div>
             {% if whitelist_active %}
-            <p class="form-footer" style="margin: -12px 0 4px; color: #7c2d58; font-weight: 600;">Only approved discovery passphrases may access this proof-of-concept environment.</p>
+            <p class="form-footer" style="margin: -12px 0 4px; color: #1c4f7a; font-weight: 600;">Only approved discovery passphrases may access this proof-of-concept environment.</p>
             {% endif %}
             {% if errors %}
             <div class="error" role="alert">
@@ -378,7 +386,7 @@
                 <button type="submit">Enter control room</button>
             </form>
             <div class="form-footer">
-                Tip: manage the whitelist via <code>CHRISTOPHE_PASSPHRASE_WHITELIST</code> and toggle enforcement with <code>CHRISTOPHE_PASSPHRASE_WHITELIST_ENABLED</code> in your <code>.env</code> file.
+                Tip: manage the whitelist via <code>ERNEST_PASSPHRASE_WHITELIST</code> (falls back to <code>CHRISTOPHE_PASSPHRASE_WHITELIST</code>) and toggle enforcement with <code>ERNEST_PASSPHRASE_WHITELIST_ENABLED</code> in your <code>.env</code> file.
             </div>
         </section>
     </main>
