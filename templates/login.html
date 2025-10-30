@@ -2,115 +2,393 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>Authenticate - Christophe</title>
+    <title>{{ brand_name }} {{ brand_tagline }}</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/ernest-mark.svg') }}">
     <style>
         :root {
-            color-scheme: light;
-            --bg: radial-gradient(circle at 10% 20%, #312e81 0%, #1e1b4b 45%, #0f172a 100%);
+            color-scheme: only light;
+            --ink: #0e1b2a;
+            --ink-soft: #244462;
+            --canvas: #f4f7fc;
+            --canvas-accent: radial-gradient(circle at 20% 20%, rgba(58, 166, 233, 0.18), transparent 65%);
             --surface: #ffffff;
-            --primary: #4f46e5;
-            --primary-soft: #6366f1;
-            --text-strong: #1e1b4b;
-            --text: #475569;
-            --border: #dbeafe;
+            --surface-subtle: #eff5fb;
+            --surface-strong: #ffffff;
+            --blue: #3aa6e9;
+            --blue-dark: #1c6fb2;
+            --iris: #0e1b2a;
+            --muted: #5a748d;
+            --magenta: #3aa6e9;
+            --text-hero: #0e1b2a;
+            --text-soft: #5a748d;
+            --card-border: rgba(30, 87, 122, 0.16);
+            --shadow: 0 32px 70px rgba(14, 27, 42, 0.12);
         }
 
         *, *::before, *::after { box-sizing: border-box; }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: var(--bg);
             margin: 0;
-            padding: 24px;
             min-height: 100vh;
+            font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, sans-serif;
+            background: var(--canvas);
+            color: var(--ink);
             display: flex;
             align-items: center;
             justify-content: center;
+            padding: 40px 24px;
+            position: relative;
+            overflow: hidden;
         }
 
-        .login-container {
+        body::before,
+        body::after {
+            content: "";
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(0px);
+            opacity: 0.7;
+        }
+
+        body::before {
+            width: 420px;
+            height: 420px;
+            top: -160px;
+            left: -140px;
+            background: radial-gradient(circle, rgba(58, 166, 233, 0.35), transparent 70%);
+        }
+
+        body::after {
+            width: 360px;
+            height: 360px;
+            bottom: -140px;
+            right: -120px;
+            background: radial-gradient(circle, rgba(14, 27, 42, 0.12), transparent 65%);
+        }
+
+        main {
+            position: relative;
+            z-index: 1;
+            display: grid;
+            grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+            gap: 42px;
+            width: min(1080px, 100%);
+            align-items: stretch;
+        }
+
+        .brand-panel {
             background: var(--surface);
-            padding: 40px 44px;
-            border-radius: 18px;
-            box-shadow: 0 24px 55px rgba(15, 23, 42, 0.35);
-            max-width: 420px;
-            width: 100%;
+            border: 1px solid var(--card-border);
+            border-radius: 28px;
+            padding: 48px;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 36px;
+            box-shadow: var(--shadow);
         }
 
-        h1 { margin-top: 0; color: var(--text-strong); letter-spacing: -0.01em; }
+        .brand-panel::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(58, 166, 233, 0.14), rgba(255, 255, 255, 0));
+            border-radius: inherit;
+            pointer-events: none;
+        }
 
-        p { color: var(--text); }
+        .brand-header {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 18px;
+        }
 
-        label { display: block; margin-bottom: 8px; font-weight: 600; color: #334155; }
+        .brand-logo {
+            width: 90px;
+            height: 90px;
+            border-radius: 28px;
+            background: var(--surface-subtle);
+            display: grid;
+            place-items: center;
+            box-shadow: 0 18px 40px rgba(14, 27, 42, 0.15);
+            border: 1px solid var(--card-border);
+        }
+
+        .brand-logo img {
+            width: 68px;
+            height: 68px;
+        }
+
+        .brand-title {
+            margin: 0;
+            font-size: clamp(2.4rem, 2.8vw, 3rem);
+            letter-spacing: -0.03em;
+            color: var(--ink);
+        }
+
+        .brand-tagline {
+            margin: 6px 0 0;
+            font-size: 0.95rem;
+            letter-spacing: 0.28em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        .brand-summary {
+            position: relative;
+            background: linear-gradient(120deg, rgba(58, 166, 233, 0.08), rgba(255, 255, 255, 0));
+            border: 1px solid rgba(58, 166, 233, 0.35);
+            border-radius: 18px;
+            padding: 20px 24px;
+            backdrop-filter: blur(6px);
+        }
+
+        .brand-summary strong {
+            color: var(--blue);
+        }
+
+        .brand-summary p {
+            margin: 0 0 8px;
+            color: var(--muted);
+            font-size: 0.98rem;
+        }
+
+        .brand-points {
+            margin: 0;
+            padding: 0;
+            list-style: none;
+            display: grid;
+            gap: 14px;
+        }
+
+        .brand-points li {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 0.98rem;
+            color: var(--muted);
+        }
+
+        .brand-points li::before {
+            content: "";
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--blue), var(--blue-dark));
+            box-shadow: 0 0 16px rgba(58, 166, 233, 0.25);
+        }
+
+        .brand-footer {
+            position: relative;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        .brand-footer span {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            border-radius: 999px;
+            background: rgba(58, 166, 233, 0.12);
+            border: 1px solid rgba(58, 166, 233, 0.25);
+        }
+
+        .form-card {
+            position: relative;
+            background: var(--surface-strong);
+            border-radius: 26px;
+            padding: 44px 40px;
+            box-shadow: 0 28px 60px rgba(14, 27, 42, 0.12);
+            border: 1px solid var(--card-border);
+            display: flex;
+            flex-direction: column;
+            gap: 28px;
+            color: #0f172a;
+        }
+
+        .form-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 18px;
+        }
+
+        .form-header h2 {
+            margin: 0;
+            font-size: 1.9rem;
+            letter-spacing: -0.02em;
+            color: #041026;
+        }
+
+        .form-header p {
+            margin: 6px 0 0;
+            color: #475569;
+            font-size: 0.98rem;
+        }
+
+        .access-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: rgba(58, 166, 233, 0.14);
+            color: var(--blue-dark);
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #0f172a;
+        }
 
         input[type="password"] {
             width: 100%;
-            padding: 12px 14px;
-            border-radius: 12px;
-            border: 1px solid var(--border);
-            font-size: 16px;
-            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            padding: 14px 16px;
+            border-radius: 16px;
+            border: 1px solid rgba(148, 163, 184, 0.55);
+            font-size: 1rem;
             background: #f8fafc;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
         }
 
         input[type="password"]:focus {
-            border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+            border-color: var(--blue);
+            box-shadow: 0 0 0 4px rgba(31, 176, 255, 0.18);
             outline: none;
         }
 
         button {
-            margin-top: 18px;
+            margin-top: 6px;
             width: 100%;
-            padding: 14px;
+            padding: 15px 18px;
+            border-radius: 18px;
             border: none;
-            border-radius: 12px;
-            background: linear-gradient(135deg, var(--primary), var(--primary-soft));
+            background: linear-gradient(120deg, var(--blue-dark), var(--blue));
             color: #fff;
-            font-size: 16px;
+            font-size: 1.05rem;
             font-weight: 600;
+            letter-spacing: 0.01em;
             cursor: pointer;
-            box-shadow: 0 16px 35px rgba(79, 70, 229, 0.35);
-            transition: transform 0.15s ease, box-shadow 0.2s ease;
+            box-shadow: 0 20px 40px rgba(58, 166, 233, 0.28);
+            transition: transform 0.18s ease, box-shadow 0.22s ease;
         }
 
         button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 20px 45px rgba(79, 70, 229, 0.4);
+            transform: translateY(-2px);
+            box-shadow: 0 28px 60px rgba(28, 112, 178, 0.35);
         }
 
         button:focus-visible {
-            outline: 3px solid rgba(99, 102, 241, 0.55);
-            outline-offset: 3px;
+            outline: 3px solid rgba(58, 166, 233, 0.55);
+            outline-offset: 4px;
         }
 
         .error {
-            background: #fee2e2;
-            color: #b91c1c;
-            padding: 12px 16px;
-            border-radius: 10px;
-            margin-bottom: 12px;
+            background: rgba(255, 238, 240, 0.92);
+            color: #b42335;
+            border-radius: 14px;
+            padding: 14px 18px;
+            border: 1px solid rgba(218, 70, 93, 0.35);
+        }
+
+        .error ul {
+            margin: 0;
+            padding-left: 18px;
+        }
+
+        .form-footer {
+            font-size: 0.85rem;
+            color: #64748b;
+            line-height: 1.6;
+        }
+
+        @media (max-width: 1024px) {
+            main { grid-template-columns: 1fr; }
+            .brand-panel { order: 2; padding: 36px; }
+            .form-card { order: 1; }
+        }
+
+        @media (max-width: 600px) {
+            body { padding: 24px 16px; }
+            .brand-panel { padding: 28px; border-radius: 22px; }
+            .form-card { padding: 32px 26px; border-radius: 22px; }
+            .brand-header { flex-direction: column; align-items: flex-start; }
+            .brand-logo { width: 80px; height: 80px; }
+            .form-header { flex-direction: column; align-items: flex-start; }
         }
     </style>
 </head>
 <body>
-    <div class="login-container">
-        <h1>Christophe Portal</h1>
-        <p>Use your passphrase to create or access your personal migration workspace.</p>
-        {% if errors %}
-        <div class="error">
-            <ul>
-            {% for err in errors %}
-                <li>{{ err }}</li>
-            {% endfor %}
-            </ul>
-        </div>
-        {% endif %}
-        <form method="post">
-            <label for="passphrase">Passphrase</label>
-            <input id="passphrase" name="passphrase" type="password" required autocomplete="current-password">
-            <button type="submit">Continue</button>
-        </form>
-    </div>
+    <main>
+        <section class="brand-panel" aria-labelledby="brand-title">
+            <div>
+                <div class="brand-header">
+                    <div class="brand-logo">
+                        <img src="{{ url_for('static', filename='img/ernest-mark.svg') }}" alt="{{ brand_name }} logo">
+                    </div>
+                    <div>
+                        <h1 id="brand-title" class="brand-title">{{ brand_name }}</h1>
+                        <p class="brand-tagline">{{ brand_tagline }}</p>
+                    </div>
+                </div>
+                <div class="brand-summary">
+                    <p><strong>SAP ECC → SAP S/4HANA</strong> readiness, architecture discovery, and blueprinting in a single cockpit. {{ brand_name }} keeps orchestration transparent while the AI handles the migration legwork.</p>
+                    <ul class="brand-points">
+                        <li>Visualise dependency pressure before you extract a single transport.</li>
+                        <li>Stage iterative refactors with automated safety harnesses.</li>
+                        <li>Track workforce-ready scaffolding for critical business flows.</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="brand-footer">
+                <span>Eye on every interface</span>
+                <span>Blueprinted with {{ brand_name }} blue</span>
+                <span>PoC portal for enterprise crews</span>
+            </div>
+        </section>
+        <section class="form-card" aria-labelledby="form-title">
+            <div class="form-header">
+                <div>
+                    <h2 id="form-title">Access your workspace</h2>
+                    <p>Authenticate with your project passphrase to open the {{ brand_name }} control room.</p>
+                </div>
+                {% if whitelist_active %}
+                <span class="access-pill" aria-live="polite">Preview whitelist</span>
+                {% endif %}
+            </div>
+            {% if whitelist_active %}
+            <p class="form-footer" style="margin: -12px 0 4px; color: #1c4f7a; font-weight: 600;">Only approved discovery passphrases may access this proof-of-concept environment.</p>
+            {% endif %}
+            {% if errors %}
+            <div class="error" role="alert">
+                <ul>
+                {% for err in errors %}
+                    <li>{{ err }}</li>
+                {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+            <form method="post" autocomplete="off">
+                <label for="passphrase">Passphrase</label>
+                <input id="passphrase" name="passphrase" type="password" required autocomplete="current-password" autofocus>
+                <button type="submit">Enter control room</button>
+            </form>
+            <div class="form-footer">
+                Tip: manage the whitelist via <code>ERNEST_PASSPHRASE_WHITELIST</code> (falls back to <code>CHRISTOPHE_PASSPHRASE_WHITELIST</code>) and toggle enforcement with <code>ERNEST_PASSPHRASE_WHITELIST_ENABLED</code> in your <code>.env</code> file.
+            </div>
+        </section>
+    </main>
 </body>
 </html>

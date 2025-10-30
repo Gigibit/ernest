@@ -1,0 +1,37 @@
+{
+  "profiles": {
+    "classify": [
+      "{\n  \"detected_language\": \"kotlin\",\n  \"detected_framework\": \"Spring Boot\",\n  \"confidence\": 0.37,\n  \"notes\": \"Mocked classification payload from ERNEST demo fixtures.\"\n}"
+    ],
+    "analyze": [
+      "{\n  \"summary\": \"Mocked static analysis describing the uploaded project.\",\n  \"key_findings\": [\"UI preview mode enabled\"],\n  \"risk\": \"low\"\n}"
+    ],
+    "architecture": [
+      "{\n  \"plan\": [\"Stabilise source tree\", \"Map services to SAP S/4HANA\", \"Validate deployment in container sandbox\"],\n  \"owner\": \"ERNEST demo orchestrator\"\n}"
+    ],
+    "container": [
+      "{\n  \"dockerfile\": \"# syntax=docker/dockerfile:1\\nFROM eclipse-temurin:17-jre-alpine\\nCOPY . /app\\nCMD ['java','-jar','app.jar']\",\n  \"compose\": \"version: '3.9'\\nservices:\\n  ernest:\\n    build: .\\n    ports:\\n      - '8080:8080'\"\n}"
+    ],
+    "translate": [
+      "{\n  \"summary\": \"Mock translation snippet provided by ERNEST fixtures.\"\n}"
+    ],
+    "adapt": [
+      "{\n  \"summary\": \"Mock adaptation guidance to retrofit code paths.\"\n}"
+    ],
+    "scaffold": [
+      "{\n  \"files\": [\"README.md\", \"Dockerfile\"],\n  \"notes\": \"Generated from mock replay store.\"\n}"
+    ],
+    "dependency": [
+      "{\n  \"manifests\": [\"pom.xml\"],\n  \"dependencies\": [{\"name\": \"org.springframework.boot\", \"version\": \"3.2.0\"}]\n}"
+    ],
+    "compatibility": [
+      "{\n  \"entries\": [{\"source\": \"sap ecc\", \"alternative\": \"sap s/4hana\", \"notes\": \"Mock compatibility hint.\"}]\n}"
+    ],
+    "blueprint": [
+      "{\n  \"summary\": \"Mock blueprint payload for UI demos.\"\n}"
+    ]
+  },
+  "default": [
+    "{\n  \"mode\": \"mock\",\n  \"message\": \"Default ERNEST mock response.\"\n}"
+  ]
+}

@@ -13,6 +13,85 @@ HF_TOKEN=hf_xxx
 The application automatically loads the `.env` file on startup so the token is
 available when downloading models.
 
+## Passphrase whitelist (enterprise PoC)
+
+The authenticated web portal can be locked down to a fixed list of preview
+passphrases so only pre-approved stakeholders can sign in while the proof of
+concept is under review. Configure the guard via `.env`:
+
+```bash
+# Comma, semicolon, or newline separated passphrases that are allowed to sign in
+# via the login form or the `/api/auth` endpoint.
+ERNEST_PASSPHRASE_WHITELIST="alpha-pass,bravo-pass,charlie-pass"
+
+# Optional toggle. Set to `false`/`0`/`off` to temporarily disable the
+# whitelist without editing the passphrase list.
+ERNEST_PASSPHRASE_WHITELIST_ENABLED=true
+```
+
+When the whitelist is active, any login attempt using a passphrase that is not
+listed will be rejected server-side and the user will see a "Passphrase is not
+authorised" error. Clearing the whitelist variable or toggling the
+`ERNEST_PASSPHRASE_WHITELIST_ENABLED` flag disables the restriction. Legacy
+deployments that still export `CHRISTOPHE_PASSPHRASE_WHITELIST(_ENABLED)` remain
+compatible; the ERNEST-prefixed settings simply take precedence.
+
+## Mock UI previews without downloading models
+
+When you only need to exercise the ERNEST UI or demo the workflow without
+downloading Hugging Face checkpoints, load the bundled `.env.mock` file. It
+enables a deterministic passphrase, switches the LLM service into mock mode, and
+points it at `mock/mock_llm_responses.json` so responses are replayed from disk
+instead of invoking live models:
+
+```bash
+ENV_FILE=.env.mock python christophe.py --serve
+```
+
+Mock mode honours the following environment variables (ERNEST-prefixed names win
+over their CHRISTOPHE predecessors when both are present):
+
+* `ERNEST_LLM_MODE` – set to `mock` to bypass model downloads entirely. Any
+  other value keeps the standard behaviour.
+* `ERNEST_LLM_REPLAY_PATH` – optional path to a JSON transcript with recorded
+  completions. The default `.env.mock` file points at
+  `mock/mock_llm_responses.json`, which ships with representative payloads for
+  each LLM profile.
+
+Replay files accept a few simple shapes:
+
+* `{ "records": { "<prompt_hash>": "raw completion" } }` – map specific
+  prompt hashes (see `LLMService.prompt_hash`) to canned completions.
+* `{ "profiles": { "translate": ["…", "…"], "architecture": "…" } }` –
+  provide profile-wide defaults as either a string or list; lists cycle between
+  entries on successive calls.
+* `{ "default": "…" }` – optional fallback used when no hash/profile match is
+  found.
+
+Combine these shapes as needed. Entries that contain `completion`, `text`, or
+`values` fields are normalised automatically, so exporting logs from previous
+runs requires minimal editing. If no transcript is supplied, ERNEST returns a
+structured placeholder noting that mock mode is active.
+
+## Container-ready backend migrations
+
+Whenever a migration targets a backend or service-oriented stack, the
+orchestrator now asks the LLM collective for containerisation guidance. The
+resulting blueprint includes:
+
+* a production-grade `Dockerfile` that favours multi-stage builds and runtime
+  hardening;
+* an optional `docker-compose.yml` with service wiring suited to the detected
+  dependencies;
+* a `.dockerignore` tailored to the generated project structure;
+* operational notes outlining environment variables, health checks, and SAP
+  S/4HANA nuances when applicable.
+
+The planner cross-pollinates signals from the architecture, dependency, and
+compatibility agents to keep the Docker assets aligned with the target
+framework. Existing container files in the scaffold are respected, so you can
+override the generated artefacts manually when necessary.
+
 ## Paginated migrations and iterative refinement
 
 Large projects can be migrated in multiple passes to keep LLM prompts within a
@@ -37,26 +116,27 @@ is queued.
 ### Environment overrides
 
 Automatic pagination thresholds honour the following optional environment
-variables when present:
+variables when present (use the `ERNEST_` prefix; the legacy
+`CHRISTOPHE_` names remain supported as a fallback):
 
-* `CHRISTOPHE_AUTO_PAGE_SMALL_LINES`, `..._MEDIUM_LINES`, `..._LARGE_LINES`,
+* `ERNEST_AUTO_PAGE_SMALL_LINES`, `..._MEDIUM_LINES`, `..._LARGE_LINES`,
   `..._HUGE_LINES` – control the line-count breakpoints used to switch between
   single-pass and multi-pass migrations.
-* `CHRISTOPHE_AUTO_PAGE_MEDIUM_CHUNKS`, `..._LARGE_CHUNKS`,
+* `ERNEST_AUTO_PAGE_MEDIUM_CHUNKS`, `..._LARGE_CHUNKS`,
   `..._HUGE_CHUNKS`, `..._MASSIVE_CHUNKS` – define how many chunks should be
   grouped per page for each size bracket.
-* `CHRISTOPHE_AUTO_PAGE_PROJECT_FILES`, `..._PROJECT_LINES`, and
+* `ERNEST_AUTO_PAGE_PROJECT_FILES`, `..._PROJECT_LINES`, and
   `..._PROJECT_CHUNKS` – adjust when large projects trigger more conservative
   chunk sizes.
 
 Automatic refinement heuristics can also be tuned via:
 
-* `CHRISTOPHE_AUTO_REFINE_BASE` – default number of refinement passes when the
+* `ERNEST_AUTO_REFINE_BASE` – default number of refinement passes when the
   active strategy supports iterative polishing (defaults to `1`).
-* `CHRISTOPHE_AUTO_REFINE_COMPLEX` – number of passes used for large or complex
+* `ERNEST_AUTO_REFINE_COMPLEX` – number of passes used for large or complex
   artefacts (defaults to `2`).
-* `CHRISTOPHE_AUTO_REFINE_LINES`, `CHRISTOPHE_AUTO_REFINE_CHUNKS`, and
-  `CHRISTOPHE_AUTO_REFINE_PROJECT_LINES` – thresholds that decide when the
+* `ERNEST_AUTO_REFINE_LINES`, `ERNEST_AUTO_REFINE_CHUNKS`, and
+  `ERNEST_AUTO_REFINE_PROJECT_LINES` – thresholds that decide when the
   complex pass count should be applied.
 
 Unset variables fall back to sensible defaults tuned for 7B class models.
@@ -148,6 +228,18 @@ Each migration is recorded asynchronously, so long-running runs remain visible
 under *Active uploads* until completion.  Completed migrations move to the
 dedicated section and remain downloadable as long as the output archive exists
 on disk.
+
+Downloads are now organised as `ernst_<project_id>_archive.zip`. Each archive
+bundles both perspectives of the migration so hand-offs stay traceable:
+
+```
+ernst_<uuid>_archive.zip
+└── input_project/   # pristine copy of the uploaded legacy ZIP
+└── output_project/  # generated scaffold and translated artefacts
+```
+
+This structure makes it easy to diff the delivered output against the original
+payload or to re-run partial migrations without re-uploading artefacts.
 
 Use the *Log out* link in the header to clear the current session and return to
 the passphrase prompt.
@@ -241,22 +333,23 @@ codebase:
 
 ```bash
 # Override the default $10.58 infrastructure spend.
-export CHRISTOPHE_RESOURCE_COST=14.25
+export ERNEST_RESOURCE_COST=14.25
 
 # Provide a custom markup as a decimal or percentage string.
-export CHRISTOPHE_COST_MARKUP=0.6     # 60 %
+export ERNEST_COST_MARKUP=0.6     # 60 %
 # …or…
-export CHRISTOPHE_COST_MARKUP=60%
+export ERNEST_COST_MARKUP=60%
 
 # Optional contextual hints shown in the receipt.
-export CHRISTOPHE_RESOURCE_TIME_LEFT="5h 43m left at current spend rate"
-export CHRISTOPHE_RESOURCE_CONTEXT="Includes tokens generation fee"
+export ERNEST_RESOURCE_TIME_LEFT="5h 43m left at current spend rate"
+export ERNEST_RESOURCE_CONTEXT="Includes tokens generation fee"
 ```
 
-If `CHRISTOPHE_COST_MARKUP` is not set the application falls back to
-`CHRISTOPHE_MARKUP_RATE`; both default to a 45 % gain.  Clearing
-`CHRISTOPHE_RESOURCE_COST` or setting it to `0` removes the baseline spend from
-future receipts.
+If `ERNEST_COST_MARKUP` is not set the application falls back to
+`ERNEST_MARKUP_RATE`; both default to a 45 % gain.  Clearing
+`ERNEST_RESOURCE_COST` or setting it to `0` removes the baseline spend from
+future receipts. Deployments that still export the legacy `CHRISTOPHE_*` names
+remain compatible, but the ERNEST prefix wins when both are present.
 
 ## Suggested machine capabilities
 
