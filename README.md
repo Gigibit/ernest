@@ -296,6 +296,20 @@ the browser, enter a passphrase to create or resume your workspace, and begin
 uploading archives from the dashboard. Use `Ctrl+C` in the terminal to stop the
 server when you are done.
 
+### Serving behind a reverse-proxy prefix
+
+When the UI sits behind a reverse proxy that injects a path prefix (for example
+mounting the entire application at `/ernest`), set `ERNEST_WEB_ROOT_PATH` to the
+desired prefix before launching the server:
+
+```bash
+export ERNEST_WEB_ROOT_PATH=/ernest
+python christophe.py --serve
+```
+
+The Flask app automatically rewrites generated URLs—including static assets—so
+favicon and SVG requests continue to resolve under the prefixed path.
+
 
 ### Obtaining API tokens
 
