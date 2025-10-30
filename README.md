@@ -36,6 +36,23 @@ authorised" error. Clearing the whitelist variable or toggling the
 deployments that still export `CHRISTOPHE_PASSPHRASE_WHITELIST(_ENABLED)` remain
 compatible; the ERNEST-prefixed settings simply take precedence.
 
+## Mock testing configuration
+
+The repository includes a `.env.mock` template that configures the service for
+lightweight smoke tests. Copy it to `.env` to launch the Flask UI or CLI with
+Hugging Face's `sshleifer/tiny-gpt2` checkpoint for every LLM profile, disable
+the passphrase gate, and keep worker fan-out to a single thread:
+
+```bash
+cp .env.mock .env
+```
+
+The template also forces deterministic sampling (temperature `0.0`) and lowers
+each profile's `MAX_TOKENS` setting so generations complete quickly during
+mocked runs. If you have not previously downloaded the tiny GPT-2 weights,
+export a short-lived `HF_TOKEN` before the first run so `transformers` can grab
+the checkpoint.
+
 ## Container-ready backend migrations
 
 Whenever a migration targets a backend or service-oriented stack, the
@@ -47,8 +64,8 @@ resulting blueprint includes:
 * an optional `docker-compose.yml` with service wiring suited to the detected
   dependencies;
 * a `.dockerignore` tailored to the generated project structure;
-* operational notes outlining environment variables, health checks, and SAP
-  S/4HANA nuances when applicable.
+* operational notes outlining environment variables, health checks, and
+  stack-specific nuances when applicable.
 
 The planner cross-pollinates signals from the architecture, dependency, and
 compatibility agents to keep the Docker assets aligned with the target
@@ -242,6 +259,20 @@ interface or port. When the server starts you can open `http://<host>:<port>` in
 the browser, enter a passphrase to create or resume your workspace, and begin
 uploading archives from the dashboard. Use `Ctrl+C` in the terminal to stop the
 server when you are done.
+
+### Serving behind a reverse-proxy prefix
+
+When the UI sits behind a reverse proxy that injects a path prefix (for example
+mounting the entire application at `/ernest`), set `ERNEST_WEB_ROOT_PATH` to the
+desired prefix before launching the server:
+
+```bash
+export ERNEST_WEB_ROOT_PATH=/ernest
+python christophe.py --serve
+```
+
+The Flask app automatically rewrites generated URLs—including static assets—so
+favicon and SVG requests continue to resolve under the prefixed path.
 
 
 ### Obtaining API tokens
