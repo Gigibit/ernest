@@ -17,7 +17,8 @@ def load_env_file(path: str | Path = ".env", *, override: bool = False) -> Dict[
     existing environment variables are left untouched.
     """
 
-    env_path = Path(path)
+    env_override = os.environ.get("ENV_FILE") or os.environ.get("ERNEST_ENV_FILE")
+    env_path = Path(env_override or path)
     if not env_path.exists():
         return {}
 
