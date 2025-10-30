@@ -156,6 +156,13 @@ class ScaffoldingAgent:
                 and all(isinstance(value, str) for value in entry)
             ):
                 path, content = entry
+            elif isinstance(entry, str):
+                logging.debug(
+                    "Coercing scaffold string entry at index %s into empty file: %r",
+                    index,
+                    entry,
+                )
+                path, content = entry, ""
             else:
                 raise TypeError(f"Invalid scaffold entry at index {index}: {entry!r}")
 
