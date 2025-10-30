@@ -1,10 +1,12 @@
 # core/llm_service.py
 import hashlib
+import json
 import logging
 import os
 import shutil
-from collections import defaultdict
-from typing import Dict
+from collections import defaultdict, deque
+from pathlib import Path
+from typing import Dict, Iterable, Mapping
 
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 import torch
@@ -24,6 +26,17 @@ class LLMService:
         self._usage = defaultdict(
             lambda: {"prompt_tokens": 0, "completion_tokens": 0, "invocations": 0}
         )
+        self.mode = (
+            (os.environ.get("ERNEST_LLM_MODE") or os.environ.get("CHRISTOPHE_LLM_MODE") or "live")
+            .strip()
+            .lower()
+        )
+        self._replay_records = {}
+        self._replay_profiles = {}
+        self._replay_default = deque()
+        self._replay_path = None
+        if self.mode == "mock":
+            self._initialise_mock_store()
         self._log_hardware_state()
 
     def _get_pipe(self, name):
@@ -49,6 +62,11 @@ class LLMService:
         return self._pipes[name]
 
     def invoke(self, name: str, prompt: str, **overrides) -> str:
+        if self.mode == "mock":
+            completion = self._mock_completion(name, prompt)
+            self._register_mock_usage(name, prompt, completion)
+            return completion
+
         pipe_bundle = self._get_pipe(name)
         pipe = pipe_bundle["pipe"]
         prof = pipe_bundle["profile"]
@@ -197,3 +215,147 @@ class LLMService:
                     logging.info("CUDA not available; running migrations on CPU.")
         except Exception as exc:  # noqa: BLE001
             logging.warning("Unable to determine CUDA support: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Mock replay helpers
+    # ------------------------------------------------------------------
+    def _initialise_mock_store(self) -> None:
+        replay_env = os.environ.get("ERNEST_LLM_REPLAY_PATH") or os.environ.get(
+            "CHRISTOPHE_LLM_REPLAY_PATH"
+        )
+        if replay_env:
+            path = Path(replay_env).expanduser()
+            if not path.is_absolute():
+                path = Path.cwd() / path
+            if path.exists():
+                try:
+                    payload = json.loads(path.read_text())
+                except json.JSONDecodeError as exc:
+                    logging.warning(
+                        "Unable to decode mock LLM transcript %s: %s", path, exc
+                    )
+                else:
+                    self._replay_path = path
+                    self._load_mock_payload(payload)
+                    logging.info(
+                        "LLM mock mode active; replaying completions from %s", path
+                    )
+            else:
+                logging.warning(
+                    "LLM mock mode requested but replay file %s was not found", path
+                )
+        if not self._replay_records and not self._replay_profiles and not self._replay_default:
+            logging.info(
+                "LLM mock mode active without transcript; falling back to stub completions."
+            )
+
+    def _load_mock_payload(self, payload) -> None:
+        if isinstance(payload, Mapping):
+            records = payload.get("records")
+            if isinstance(records, Mapping):
+                for key, value in records.items():
+                    self._replay_records[str(key)] = self._normalise_values(value)
+            # Allow top-level hashes without explicit "records" wrapper.
+            for key, value in payload.items():
+                if key in {"records", "profiles", "default"}:
+                    continue
+                if self._looks_like_hash(key):
+                    self._replay_records.setdefault(str(key), self._normalise_values(value))
+            profiles = payload.get("profiles")
+            if isinstance(profiles, Mapping):
+                for profile, value in profiles.items():
+                    self._replay_profiles[str(profile)] = deque(
+                        self._normalise_values(value)
+                    )
+            default = payload.get("default")
+            if default is not None:
+                self._replay_default = deque(self._normalise_values(default))
+        elif isinstance(payload, Iterable):
+            for entry in payload:
+                if isinstance(entry, Mapping):
+                    key = entry.get("key") or entry.get("hash")
+                    if key:
+                        self._replay_records[str(key)] = self._normalise_values(
+                            entry.get("completion")
+                            or entry.get("text")
+                            or entry.get("value")
+                            or entry.get("response")
+                            or ""
+                        )
+                    profile = entry.get("profile")
+                    if profile:
+                        self._replay_profiles.setdefault(str(profile), deque()).extend(
+                            self._normalise_values(
+                                entry.get("completion")
+                                or entry.get("text")
+                                or entry.get("value")
+                                or entry.get("response")
+                                or ""
+                            )
+                        )
+
+    @staticmethod
+    def _looks_like_hash(key: str) -> bool:
+        return len(key) >= 16 and all(ch in "0123456789abcdef" for ch in key.lower())
+
+    @staticmethod
+    def _normalise_values(raw) -> deque:
+        values = []
+        if raw is None:
+            values.append("")
+        elif isinstance(raw, str):
+            values.append(raw)
+        elif isinstance(raw, Mapping):
+            if "values" in raw and isinstance(raw["values"], Iterable):
+                for item in raw["values"]:
+                    values.extend(LLMService._normalise_values(item))
+            elif "completion" in raw:
+                values.extend(LLMService._normalise_values(raw["completion"]))
+            elif "text" in raw:
+                values.extend(LLMService._normalise_values(raw["text"]))
+            else:
+                values.append(json.dumps(raw))
+        elif isinstance(raw, Iterable):
+            for item in raw:
+                values.extend(LLMService._normalise_values(item))
+        else:
+            values.append(str(raw))
+        if not values:
+            values.append("")
+        return deque(values)
+
+    def _cycle(self, values: deque) -> str:
+        if not values:
+            return ""
+        result = values[0]
+        if len(values) > 1:
+            values.rotate(-1)
+        return result
+
+    def _mock_completion(self, profile: str, prompt: str) -> str:
+        cache_key = self.prompt_hash(profile, prompt)
+        record = self._replay_records.get(cache_key)
+        if record:
+            return self._cycle(record)
+        profile_seq = self._replay_profiles.get(profile)
+        if profile_seq:
+            return self._cycle(profile_seq)
+        if self._replay_default:
+            return self._cycle(self._replay_default)
+        # Fallback stub embeds prompt snippet for debugging but avoids newline-heavy output.
+        snippet = prompt.strip().splitlines()
+        snippet = snippet[0][:120] if snippet else ""
+        return json.dumps(
+            {
+                "mode": "mock",
+                "profile": profile,
+                "detail": "No mock transcript found; returning stub response.",
+                "prompt_preview": snippet,
+            }
+        )
+
+    def _register_mock_usage(self, profile: str, prompt: str, completion: str) -> None:
+        record = self._usage[profile]
+        record["prompt_tokens"] += len(prompt.split())
+        record["completion_tokens"] += len(completion.split())
+        record["invocations"] += 1
