@@ -64,8 +64,8 @@ resulting blueprint includes:
 * an optional `docker-compose.yml` with service wiring suited to the detected
   dependencies;
 * a `.dockerignore` tailored to the generated project structure;
-* operational notes outlining environment variables, health checks, and SAP
-  S/4HANA nuances when applicable.
+* operational notes outlining environment variables, health checks, and
+  stack-specific nuances when applicable.
 
 The planner cross-pollinates signals from the architecture, dependency, and
 compatibility agents to keep the Docker assets aligned with the target
