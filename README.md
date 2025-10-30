@@ -36,6 +36,42 @@ authorised" error. Clearing the whitelist variable or toggling the
 deployments that still export `CHRISTOPHE_PASSPHRASE_WHITELIST(_ENABLED)` remain
 compatible; the ERNEST-prefixed settings simply take precedence.
 
+## Mock UI previews without downloading models
+
+When you only need to exercise the ERNEST UI or demo the workflow without
+downloading Hugging Face checkpoints, load the bundled `.env.mock` file. It
+enables a deterministic passphrase, switches the LLM service into mock mode, and
+points it at `mock/mock_llm_responses.json` so responses are replayed from disk
+instead of invoking live models:
+
+```bash
+ENV_FILE=.env.mock python christophe.py --serve
+```
+
+Mock mode honours the following environment variables (ERNEST-prefixed names win
+over their CHRISTOPHE predecessors when both are present):
+
+* `ERNEST_LLM_MODE` – set to `mock` to bypass model downloads entirely. Any
+  other value keeps the standard behaviour.
+* `ERNEST_LLM_REPLAY_PATH` – optional path to a JSON transcript with recorded
+  completions. The default `.env.mock` file points at
+  `mock/mock_llm_responses.json`, which ships with representative payloads for
+  each LLM profile.
+
+Replay files accept a few simple shapes:
+
+* `{ "records": { "<prompt_hash>": "raw completion" } }` – map specific
+  prompt hashes (see `LLMService.prompt_hash`) to canned completions.
+* `{ "profiles": { "translate": ["…", "…"], "architecture": "…" } }` –
+  provide profile-wide defaults as either a string or list; lists cycle between
+  entries on successive calls.
+* `{ "default": "…" }` – optional fallback used when no hash/profile match is
+  found.
+
+Combine these shapes as needed. Entries that contain `completion`, `text`, or
+`values` fields are normalised automatically, so exporting logs from previous
+runs requires minimal editing. If no transcript is supplied, ERNEST returns a
+structured placeholder noting that mock mode is active.
 ## Mock testing configuration
 
 The repository includes a `.env.mock` template that configures the service for
