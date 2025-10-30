@@ -9,7 +9,7 @@ import logging
 import re
 import textwrap
 from pathlib import Path
-from typing import Dict, Iterable, Mapping
+from typing import Any, Dict, Iterable, Mapping
 
 
 _SERVICE_HINTS = (
@@ -103,18 +103,67 @@ class ScaffoldingAgent:
             logging.info("Loaded scaffold for %s from cache", framework)
             files = cached
         else:
-            resp = self.llm.invoke("scaffold", prompt, max_new_tokens=2048)
-            match = re.search(r"\[.*\]", resp, re.DOTALL)
-            if not match:
-                raise ValueError("No JSON scaffold found in response")
-            files = json.loads(match.group(0))
-            self.cache.set(key, files)
+            files = self._request_scaffold(prompt, key)
+
+        try:
+            file_specs = self._normalise_file_specs(files)
+        except TypeError as exc:
+            if cached is not None:
+                logging.warning(
+                    "Cached scaffold entry for %s is invalid (%s); refreshing",
+                    framework,
+                    exc,
+                )
+                self.cache.set(key, None)
+                files = self._request_scaffold(prompt, key)
+                file_specs = self._normalise_file_specs(files)
+            else:
+                raise
 
         project_root = output_path / project_name
-        for file_spec in files:
+        for file_spec in file_specs:
             file_path = project_root / file_spec["path"]
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(file_spec["content"], encoding="utf-8")
 
         logging.info("Generated scaffold for %s in %s", framework, project_root)
         return project_root
+
+    def _request_scaffold(self, prompt: str, key: str) -> Any:
+        resp = self.llm.invoke("scaffold", prompt, max_new_tokens=2048)
+        match = re.search(r"\[.*\]", resp, re.DOTALL)
+        if not match:
+            raise ValueError("No JSON scaffold found in response")
+        files = json.loads(match.group(0))
+        self.cache.set(key, files)
+        return files
+
+    @staticmethod
+    def _normalise_file_specs(files: Any):
+        if isinstance(files, dict):
+            files = files.get("files")
+        if not isinstance(files, list):
+            raise TypeError("Scaffold payload is not a list of file specs")
+
+        normalised = []
+        for index, entry in enumerate(files):
+            if isinstance(entry, dict):
+                path = entry.get("path")
+                content = entry.get("content", "")
+            elif (
+                isinstance(entry, (list, tuple))
+                and len(entry) == 2
+                and all(isinstance(value, str) for value in entry)
+            ):
+                path, content = entry
+            else:
+                raise TypeError(f"Invalid scaffold entry at index {index}: {entry!r}")
+
+            if not isinstance(path, str) or not isinstance(content, str):
+                raise TypeError(
+                    f"Scaffold entry {index} must contain string path and content"
+                )
+
+            normalised.append({"path": path, "content": content})
+
+        return normalised
