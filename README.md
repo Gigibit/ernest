@@ -36,6 +36,23 @@ authorised" error. Clearing the whitelist variable or toggling the
 deployments that still export `CHRISTOPHE_PASSPHRASE_WHITELIST(_ENABLED)` remain
 compatible; the ERNEST-prefixed settings simply take precedence.
 
+## Mock testing configuration
+
+The repository includes a `.env.mock` template that configures the service for
+lightweight smoke tests. Copy it to `.env` to launch the Flask UI or CLI with
+Hugging Face's `sshleifer/tiny-gpt2` checkpoint for every LLM profile, disable
+the passphrase gate, and keep worker fan-out to a single thread:
+
+```bash
+cp .env.mock .env
+```
+
+The template also forces deterministic sampling (temperature `0.0`) and lowers
+each profile's `MAX_TOKENS` setting so generations complete quickly during
+mocked runs. If you have not previously downloaded the tiny GPT-2 weights,
+export a short-lived `HF_TOKEN` before the first run so `transformers` can grab
+the checkpoint.
+
 ## Container-ready backend migrations
 
 Whenever a migration targets a backend or service-oriented stack, the
