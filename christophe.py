@@ -12,7 +12,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
 from analysis.compatibility_agent import CompatibilitySearchAgent
 from analysis.dependency_agent import DependencyAnalysisAgent
@@ -719,7 +719,51 @@ def create_app(
     from werkzeug.utils import secure_filename
 
     template_dir = Path(__file__).resolve().with_name("templates")
+
+    raw_root_prefix, _ = _resolve_env(
+        f"{ENV_PREFIX}_WEB_ROOT_PATH",
+        legacy=f"{LEGACY_PREFIX}_WEB_ROOT_PATH",
+    )
+    root_prefix = (raw_root_prefix or "").strip()
+    if root_prefix in {"", "/"}:
+        root_prefix = ""
+    elif not root_prefix.startswith("/"):
+        root_prefix = f"/{root_prefix.lstrip('/')}"
+    else:
+        root_prefix = f"/{root_prefix.strip('/')}"
+
     app = Flask(__name__, template_folder=str(template_dir))
+
+    if root_prefix:
+        app.config["APPLICATION_ROOT"] = root_prefix
+
+        class _PrefixMiddleware:
+            def __init__(self, app: Callable[..., Any], prefix: str) -> None:
+                self.app = app
+                self.prefix = prefix
+
+            def __call__(
+                self, environ: Dict[str, Any], start_response: Callable[..., Any]
+            ) -> Iterable[bytes]:
+                path_info = environ.get("PATH_INFO", "") or "/"
+                if path_info.startswith(self.prefix):
+                    trimmed = path_info[len(self.prefix) :]
+                    existing_script = environ.get("SCRIPT_NAME", "")
+                    if existing_script.endswith(self.prefix):
+                        environ["SCRIPT_NAME"] = existing_script
+                    else:
+                        combined = f"{existing_script.rstrip('/')}{self.prefix}"
+                        environ["SCRIPT_NAME"] = combined or self.prefix
+                    environ["PATH_INFO"] = trimmed or "/"
+                    return self.app(environ, start_response)
+
+                start_response(
+                    "404 NOT FOUND",
+                    [("Content-Type", "text/plain; charset=utf-8")],
+                )
+                return [b"Not Found"]
+
+        app.wsgi_app = _PrefixMiddleware(app.wsgi_app, root_prefix)
     secret_value, _ = _resolve_env(
         f"{ENV_PREFIX}_WEB_SECRET",
         legacy=f"{LEGACY_PREFIX}_WEB_SECRET",
