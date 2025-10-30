@@ -219,7 +219,7 @@ class ContainerizationAgent:
 
             - Honour {target_framework or 'the chosen'} conventions for {target_language or 'the target language'}.
             - Optimise for production usage (multi-stage builds, health checks, environment variables).
-            - Surface SAP S/4HANA nuances when the stack references SAP technologies.
+            - Highlight any stack-specific operational nuances surfaced by the inputs.
             - Always include security hardening notes.
 
             --- STACK CONTEXT ---

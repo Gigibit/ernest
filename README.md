@@ -72,6 +72,22 @@ Combine these shapes as needed. Entries that contain `completion`, `text`, or
 `values` fields are normalised automatically, so exporting logs from previous
 runs requires minimal editing. If no transcript is supplied, ERNEST returns a
 structured placeholder noting that mock mode is active.
+## Mock testing configuration
+
+The repository includes a `.env.mock` template that configures the service for
+lightweight smoke tests. Copy it to `.env` to launch the Flask UI or CLI with
+Hugging Face's `sshleifer/tiny-gpt2` checkpoint for every LLM profile, disable
+the passphrase gate, and keep worker fan-out to a single thread:
+
+```bash
+cp .env.mock .env
+```
+
+The template also forces deterministic sampling (temperature `0.0`) and lowers
+each profile's `MAX_TOKENS` setting so generations complete quickly during
+mocked runs. If you have not previously downloaded the tiny GPT-2 weights,
+export a short-lived `HF_TOKEN` before the first run so `transformers` can grab
+the checkpoint.
 
 ## Container-ready backend migrations
 
@@ -84,8 +100,8 @@ resulting blueprint includes:
 * an optional `docker-compose.yml` with service wiring suited to the detected
   dependencies;
 * a `.dockerignore` tailored to the generated project structure;
-* operational notes outlining environment variables, health checks, and SAP
-  S/4HANA nuances when applicable.
+* operational notes outlining environment variables, health checks, and
+  stack-specific nuances when applicable.
 
 The planner cross-pollinates signals from the architecture, dependency, and
 compatibility agents to keep the Docker assets aligned with the target

@@ -1063,13 +1063,13 @@ def create_app(
         g.user = user
         g.auth_token = user.get("token")
 
-    @app.route("/logout")
+    @app.route("/ernest/logout")
     def logout():
         session.clear()
         return redirect(url_for("auth"))
 
-    @app.route("/auth", methods=["GET", "POST"])
-    @app.route("/login", methods=["GET", "POST"])
+    @app.route("/ernest/auth", methods=["GET", "POST"])
+    @app.route("/ernest/login", methods=["GET", "POST"])
     def auth():
         errors: list[str] = []
         if request.method == "POST":
@@ -1093,7 +1093,7 @@ def create_app(
             whitelist_active=whitelist_enabled,
         )
 
-    @app.route("/", methods=["GET", "POST"])
+    @app.route("/ernest/", methods=["GET", "POST"])
     def index() -> Any:
         if not g.get("user"):
             return redirect(url_for("auth"))
@@ -1200,7 +1200,7 @@ def create_app(
             user_token=g.get("auth_token", ""),
         )
 
-    @app.route("/projects/<project_id>/download")
+    @app.route("/ernest/projects/<project_id>/download")
     def download_project(project_id: str):
         if not g.get("user"):
             return redirect(url_for("auth"))
@@ -1213,7 +1213,7 @@ def create_app(
         download_name = project.get("download_name") or Path(archive_path).name
         return send_file(archive_path, as_attachment=True, download_name=download_name)
 
-    @app.route("/api/auth", methods=["POST"])
+    @app.route("/ernest/api/auth", methods=["POST"])
     def api_auth():
         payload = request.get_json(silent=True) or {}
         passphrase = (
@@ -1241,7 +1241,7 @@ def create_app(
             200,
         )
 
-    @app.route("/api/projects", methods=["GET"])
+    @app.route("/ernest/api/projects", methods=["GET"])
     def api_projects():
         token = _extract_token(request)
         user_id = user_store.resolve_token(token)
@@ -1259,7 +1259,7 @@ def create_app(
             projects_payload.append(entry)
         return ({"projects": projects_payload}, 200)
 
-    @app.route("/api/projects/<project_id>/download", methods=["GET"])
+    @app.route("/ernest/api/projects/<project_id>/download", methods=["GET"])
     def api_download_project(project_id: str):
         token = _extract_token(request)
         user_id = user_store.resolve_token(token)
@@ -1274,7 +1274,7 @@ def create_app(
         download_name = project.get("download_name") or Path(archive_path).name
         return send_file(archive_path, as_attachment=True, download_name=download_name)
 
-    @app.route("/api/migrate", methods=["POST"])
+    @app.route("/ernest/api/migrate", methods=["POST"])
     def api_migrate():
         token = _extract_token(request)
         user_id = user_store.resolve_token(token)
