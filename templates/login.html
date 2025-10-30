@@ -3,6 +3,18 @@
 <head>
     <meta charset="utf-8">
     <title>{{ brand_name }} {{ brand_tagline }}</title>
+    <meta name="description" content="Enhanced Reasoning Network for Engineering Software Transformation">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="{{ brand_name }} {{ brand_tagline }}">
+    <meta property="og:description" content="Enhanced Reasoning Network for Engineering Software Transformation">
+    <meta property="og:url" content="{{ request.base_url }}">
+    <meta property="og:image" content="{{ url_for('static', filename='img/ernest-og.svg', _external=True) }}">
+    <meta property="og:image:alt" content="{{ brand_name }} mark">
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:title" content="{{ brand_name }} {{ brand_tagline }}">
+    <meta property="twitter:description" content="Enhanced Reasoning Network for Engineering Software Transformation">
+    <meta property="twitter:url" content="{{ request.base_url }}">
+    <meta property="twitter:image" content="{{ url_for('static', filename='img/ernest-og.svg', _external=True) }}">
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/ernest-mark.svg') }}">
     <style>
         :root {
@@ -344,7 +356,7 @@
                     </div>
                 </div>
                 <div class="brand-summary">
-                    <p><strong>SAP ECC → SAP S/4HANA</strong> readiness, architecture discovery, and blueprinting in a single cockpit. {{ brand_name }} keeps orchestration transparent while the AI handles the migration legwork.</p>
+                    <p><strong>Legacy-to-modern migrations</strong> readiness, architecture discovery, and blueprinting in a single cockpit. {{ brand_name }} keeps orchestration transparent while the AI handles the migration legwork.</p>
                     <ul class="brand-points">
                         <li>Visualise dependency pressure before you extract a single transport.</li>
                         <li>Stage iterative refactors with automated safety harnesses.</li>

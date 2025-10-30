@@ -3,6 +3,18 @@
 <head>
     <meta charset="utf-8">
     <title>{{ brand_name }} {{ brand_tagline }}</title>
+    <meta name="description" content="Enhanced Reasoning Network for Engineering Software Transformation">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="{{ brand_name }} {{ brand_tagline }}">
+    <meta property="og:description" content="Enhanced Reasoning Network for Engineering Software Transformation">
+    <meta property="og:url" content="{{ request.base_url }}">
+    <meta property="og:image" content="{{ url_for('static', filename='img/ernest-og.svg', _external=True) }}">
+    <meta property="og:image:alt" content="{{ brand_name }} mark">
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:title" content="{{ brand_name }} {{ brand_tagline }}">
+    <meta property="twitter:description" content="Enhanced Reasoning Network for Engineering Software Transformation">
+    <meta property="twitter:url" content="{{ request.base_url }}">
+    <meta property="twitter:image" content="{{ url_for('static', filename='img/ernest-og.svg', _external=True) }}">
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/ernest-mark.svg') }}">
     <style>
         :root {
@@ -561,7 +573,7 @@
             <div>
                 <h1>{{ brand_name }}</h1>
                 <p class="portal-tagline">{{ brand_tagline }}</p>
-                <p>Command migrations from SAP ECC to SAP S/4HANA with iterative refinement, blueprint scaffolding, and compatibility research orchestrated in one place.</p>
+                <p>Command complex application migrations with iterative refinement, blueprint scaffolding, and compatibility research orchestrated in one place.</p>
             </div>
             <div class="account">
                 <div>Workspace</div>
@@ -586,7 +598,7 @@
                 <form method="post" enctype="multipart/form-data">
                     <div>
                         <label for="target_framework">Target framework</label>
-                        <input id="target_framework" name="target_framework" type="text" value="{{ defaults.target_framework }}" placeholder="e.g. cloud-native S/4HANA extensions">
+                        <input id="target_framework" name="target_framework" type="text" value="{{ defaults.target_framework }}" placeholder="e.g. cloud-native microservices">
                     </div>
                     <div>
                         <label for="target_lang">Target language</label>
@@ -598,7 +610,7 @@
                     </div>
                     <div>
                         <label for="src_framework">Source framework (optional)</label>
-                        <input id="src_framework" name="src_framework" type="text" value="{{ defaults.src_framework }}" placeholder="e.g. SAP ECC landscape">
+                        <input id="src_framework" name="src_framework" type="text" value="{{ defaults.src_framework }}" placeholder="e.g. legacy ERP platform">
                     </div>
                     <div class="toggle">
                         <label class="checkbox-label" for="safe_mode">
