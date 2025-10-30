@@ -733,11 +733,13 @@ def create_app(
     else:
         root_prefix = f"/{root_prefix.strip('/')}"
 
+    static_url_path = f"{root_prefix}/static" if root_prefix else "/static"
+
     app = Flask(
         __name__,
         template_folder=str(template_dir),
         static_folder=str(static_dir),
-        static_url_path="/static",
+        static_url_path=static_url_path,
     )
 
     if root_prefix:
