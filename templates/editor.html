@@ -133,11 +133,19 @@
             .logo-spotlight {
                 transition: none;
             }
+            .logo-spotlight__shell,
+            .logo-spotlight__shell img,
+            .logo-spotlight__glyph,
+            .logo-spotlight__glyph::before,
+            .logo-spotlight__glyph::after {
+                transition: none;
+            }
         }
 
         .logo-spotlight.is-visible {
             opacity: 1;
             transform: scale(1);
+            pointer-events: auto;
         }
 
         .logo-spotlight__backdrop {
@@ -158,6 +166,11 @@
             display: grid;
             place-items: center;
             overflow: hidden;
+            transition: transform 0.35s ease;
+        }
+
+        .logo-spotlight__shell.is-armed {
+            transform: rotate(2deg) scale(1.02);
         }
 
         .logo-spotlight__shell::after {
@@ -175,6 +188,57 @@
             width: 62%;
             height: 62%;
             z-index: 1;
+            transition: transform 0.38s ease, opacity 0.38s ease;
+        }
+
+        .logo-spotlight__shell.is-armed img {
+            transform: scale(0.7) rotate(-8deg);
+            opacity: 0;
+        }
+
+        .logo-spotlight__glyph {
+            position: absolute;
+            inset: 26%;
+            border-radius: 24px;
+            z-index: 2;
+            opacity: 0;
+            transform: scale(0.68) rotate(4deg);
+            transition: opacity 0.32s ease, transform 0.32s ease;
+        }
+
+        .logo-spotlight__glyph::before,
+        .logo-spotlight__glyph::after {
+            content: "";
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: 6px;
+            height: 100%;
+            border-radius: 999px;
+            background: linear-gradient(180deg, rgba(136, 192, 255, 0.92), rgba(12, 23, 40, 0.9));
+            transform-origin: center;
+            opacity: 0;
+            transform: translate(-50%, -50%) rotate(45deg) scaleY(0.35);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+
+        .logo-spotlight__glyph::after {
+            transform: translate(-50%, -50%) rotate(-45deg) scaleY(0.35);
+        }
+
+        .logo-spotlight__shell.is-armed .logo-spotlight__glyph {
+            opacity: 1;
+            transform: scale(1) rotate(0deg);
+        }
+
+        .logo-spotlight__shell.is-armed .logo-spotlight__glyph::before,
+        .logo-spotlight__shell.is-armed .logo-spotlight__glyph::after {
+            opacity: 1;
+            transform: translate(-50%, -50%) rotate(45deg) scaleY(1);
+        }
+
+        .logo-spotlight__shell.is-armed .logo-spotlight__glyph::after {
+            transform: translate(-50%, -50%) rotate(-45deg) scaleY(1);
         }
 
         header h1 {
@@ -828,6 +892,43 @@
             const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
             const baseImage = logo.querySelector('img');
             let spotlight = null;
+            let spotlightShell = null;
+
+            const hideSpotlight = () => {
+                if (!spotlight) {
+                    return;
+                }
+
+                const overlay = spotlight;
+                const shell = spotlightShell;
+
+                spotlight = null;
+                spotlightShell = null;
+
+                if (shell) {
+                    shell.classList.remove('is-armed');
+                }
+
+                const finalize = () => {
+                    overlay.remove();
+                };
+
+                overlay.classList.remove('is-visible');
+
+                if (prefersReducedMotion) {
+                    finalize();
+                } else {
+                    overlay.addEventListener('transitionend', finalize, { once: true });
+                }
+
+                logo.classList.remove('is-spotlight-source');
+            };
+
+            const closeTab = (event) => {
+                event.preventDefault();
+                hideSpotlight();
+                window.close();
+            };
 
             const ensureSpotlight = () => {
                 if (spotlight || !baseImage) {
@@ -843,6 +944,52 @@
 
                 const shell = document.createElement('div');
                 shell.className = 'logo-spotlight__shell';
+
+                const clone = baseImage.cloneNode(true);
+                clone.removeAttribute('alt');
+                clone.setAttribute('aria-hidden', 'true');
+
+                const glyph = document.createElement('span');
+                glyph.className = 'logo-spotlight__glyph';
+                glyph.setAttribute('aria-hidden', 'true');
+
+                shell.appendChild(clone);
+                shell.appendChild(glyph);
+                overlay.appendChild(shell);
+
+                const armShell = () => {
+                    shell.classList.add('is-armed');
+                };
+
+                const releaseShell = () => {
+                    shell.classList.remove('is-armed');
+                };
+
+                const dismissOverlay = () => {
+                    releaseShell();
+                    hideSpotlight();
+                };
+
+                shell.addEventListener('pointerenter', armShell);
+                shell.addEventListener('pointerleave', dismissOverlay);
+                shell.addEventListener('focusin', armShell);
+                shell.addEventListener('focusout', releaseShell);
+                shell.addEventListener('click', closeTab);
+
+                overlay.addEventListener('pointerleave', (event) => {
+                    if (!overlay.contains(event.relatedTarget)) {
+                        dismissOverlay();
+                    }
+                });
+
+                backdrop.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    dismissOverlay();
+                });
+
+                document.body.appendChild(overlay);
+                spotlight = overlay;
+                spotlightShell = shell;
                 const clone = baseImage.cloneNode(true);
                 clone.removeAttribute('alt');
                 clone.setAttribute('aria-hidden', 'true');
@@ -858,6 +1005,11 @@
 
                 return overlay;
             };
+
+            const showSpotlight = () => {
+                if (spotlight) {
+                    return;
+                }
 
             const removeSpotlight = () => {
                 if (!spotlight) {
@@ -885,6 +1037,10 @@
                 ensureSpotlight();
             };
 
+            logo.addEventListener('mouseenter', showSpotlight);
+            logo.addEventListener('focus', showSpotlight);
+            logo.addEventListener('touchstart', showSpotlight, { passive: true });
+            logo.addEventListener('blur', hideSpotlight);
             const hideSpotlight = () => {
                 logo.classList.remove('is-spotlight-source');
                 removeSpotlight();
@@ -908,6 +1064,9 @@
             logo.addEventListener('keydown', (event) => {
                 if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
                     closeTab(event);
+                }
+                if (event.key === 'Escape') {
+                    hideSpotlight();
                 }
             });
         })();
