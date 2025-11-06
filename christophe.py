@@ -14,7 +14,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from analysis.compatibility_agent import CompatibilitySearchAgent
 from analysis.dependency_agent import DependencyAnalysisAgent
@@ -49,6 +49,49 @@ LEGACY_PREFIX = "CHRISTOPHE"
 
 MAX_EDITOR_PREVIEW_BYTES = 512 * 1024  # 512 KB per file preview
 EDITOR_MANIFEST_LIMIT = 2000
+
+
+STATIC_SOURCE_EXTENSIONS = {
+    ".py",
+    ".java",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cs",
+    ".rb",
+    ".go",
+    ".rs",
+    ".php",
+    ".scala",
+    ".kt",
+    ".kts",
+    ".swift",
+    ".cbl",
+    ".cob",
+    ".cobol",
+}
+
+STATIC_RESOURCE_EXTENSIONS = {
+    ".json",
+    ".xml",
+    ".yml",
+    ".yaml",
+    ".ini",
+    ".cfg",
+    ".env",
+    ".properties",
+    ".sql",
+    ".csv",
+    ".md",
+    ".txt",
+    ".html",
+    ".htm",
+    ".css",
+}
 
 
 DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
@@ -384,6 +427,36 @@ def print_section(title: str, content: str) -> None:
     print(f"\n--- {title.upper()} ---\n{content}\n{line}")
 
 
+def _static_classification(base_path: Path) -> Dict[str, List[str]]:
+    """Classify project files without invoking the heuristic LLM pipeline."""
+
+    classification: Dict[str, List[str]] = {
+        "source": [],
+        "resource": [],
+        "other": [],
+    }
+
+    try:
+        candidates = sorted(base_path.rglob("*"), key=lambda item: item.as_posix())
+    except OSError:
+        return classification
+
+    for entry in candidates:
+        if not entry.is_file():
+            continue
+
+        suffix = entry.suffix.lower()
+        rel_path = entry.relative_to(base_path).as_posix()
+        if suffix in STATIC_SOURCE_EXTENSIONS:
+            classification["source"].append(rel_path)
+        elif suffix in STATIC_RESOURCE_EXTENSIONS:
+            classification["resource"].append(rel_path)
+        else:
+            classification["other"].append(rel_path)
+
+    return classification
+
+
 def build_services(profiles: Optional[Dict[str, Dict[str, Any]]] = None) -> tuple[LLMService, CacheManager]:
     """Initialise the shared LLM and cache services."""
 
@@ -405,14 +478,22 @@ def run_migration(
     cache: Optional[CacheManager] = None,
     page_size: Optional[int] = None,
     refine_passes: Optional[int] = None,
+    interpretation_mode: str = "heuristic",
     safe_mode: bool = True,
 ) -> Dict[str, Any]:
-    """Execute the full migration pipeline for ``zip_path``.
+    """Execute the migration pipeline for ``zip_path``.
 
     When ``page_size`` is provided the translation of each source artefact is
     paginated to avoid overloading the model context window.  ``refine_passes``
     overrides the automatic refinement heuristics; when ``None`` the migrator
     chooses how many polishing rounds to perform per page.
+
+    Parameters
+    ----------
+    interpretation_mode:
+        Selects the translation approach. ``"heuristic"`` follows the semantic
+        understanding pipeline while ``"static"`` performs a direct file-by-file
+        translation without blueprint synthesis.
     """
 
     output_root = output_root or Path("output_project")
@@ -423,22 +504,39 @@ def run_migration(
     if hasattr(llm_service, "reset_usage"):
         llm_service.reset_usage()
 
-    logging.info("Starting migration for %s", zip_path)
+    mode = (interpretation_mode or "heuristic").strip().lower()
+    if mode not in {"heuristic", "static"}:
+        raise ValueError("interpretation_mode must be 'heuristic' or 'static'")
+
+    logging.info("Starting migration for %s with %s interpretation", zip_path, mode)
 
     architecture_map: Dict[str, Dict[str, str]] = {}
     compatibility_report: Dict[str, Any] = {}
     scaffolding_blueprint: Dict[str, Any] = {}
     stub_results: list[Dict[str, Any]] = []
+    dependency_snapshot: Dict[str, Any] = {}
+    dependency_resolution: Dict[str, Any] = {}
+    containerization_payload: Dict[str, Any] = {}
+    classification: Dict[str, List[str]] = {"source": [], "resource": [], "other": []}
+    plan: List[str] = []
+    project_stats: Dict[str, Any] = {}
+    detected_stack: Optional[Dict[str, Optional[str]]] = None
+    target_path: Optional[Path] = None
+    recovery_path: Optional[Path] = None
+    src_migrator: Optional[SourceMigrator] = None
 
     with tempfile.TemporaryDirectory(prefix="ernest_") as tmp:
         temp_dir = Path(tmp)
         logging.info("Unpacking archive %s into %s", zip_path, temp_dir)
         secure_unzip(zip_path, temp_dir)
 
-        logging.info("Running heuristic classification for %s", temp_dir)
-        
         heuristic = HeuristicAnalysisAgent(str(temp_dir), llm_service, cache_manager)
-        classification = heuristic.classify_files()
+        if mode == "heuristic":
+            logging.info("Running heuristic classification for %s", temp_dir)
+            classification = heuristic.classify_files()
+        else:
+            logging.info("Running static classification for %s", temp_dir)
+            classification = _static_classification(temp_dir)
 
         source_files = classification.get("source", []) or []
         resource_files = classification.get("resource", []) or []
@@ -450,194 +548,327 @@ def run_migration(
             len(other_files),
         )
 
-        detected_stack = (
-            {"language": src_lang, "framework": src_framework}
-            if src_lang or src_framework
-            else heuristic.detect_stack(classification.get("source"))
-        )
-        if not detected_stack:
-            raise RuntimeError("Impossibile determinare lo stack sorgente.")
-        logging.info(
-            "Detected source stack: language=%s framework=%s",
-            detected_stack.get("language"),
-            detected_stack.get("framework"),
-        )
-
-        graph = SemanticGraphBuilder()
-        graph.add_nodes(classification.get("source", []))
-        plan = PlanningAgent().create_plan({}, classification.get("source", []))
-        logging.info("Planning produced %d source artefacts", len(plan))
-
-        project_stats = _collect_project_stats(temp_dir, plan)
-        logging.info(
-            "Project statistics: files=%d total_lines=%d max_file_lines=%d",
-            project_stats.get("total_files", 0),
-            project_stats.get("total_lines", 0),
-            project_stats.get("max_file_lines", 0),
-        )
-
         project_name = Path(zip_path.stem).name.replace("-", "_") or "migrated_project"
-        architecture_planner = ArchitecturePlanner(temp_dir, llm_service, cache_manager)
-        architecture_map = architecture_planner.propose(
-            plan,
-            target_language=target_lang,
-            target_framework=target_framework,
-            project_name=project_name,
-        )
-        logging.info(
-            "Architecture planner prepared %d mappings", len(architecture_map)
-        )
 
-        scaffold_agent = ScaffoldingAgent(llm_service, cache_manager)
-        target_path = scaffold_agent.generate(
-            output_root, project_name, target_framework, target_lang
-        )
-        logging.info("Scaffold generated at %s", target_path)
-
-        dependency_agent = DependencyAnalysisAgent(temp_dir, llm_service, cache_manager)
-        dependency_snapshot = dependency_agent.extract_dependencies(
-            target_language=target_lang,
-            target_framework=target_framework,
-        )
-        snapshot_dependencies = dependency_snapshot.get("dependencies", []) or []
-        logging.info(
-            "Dependency snapshot captured %d dependencies across %d manifests",
-            len(snapshot_dependencies),
-            len(dependency_snapshot.get("manifests", []) or []),
-        )
-
-        blueprint_agent = ScaffoldingBlueprintAgent(
-            temp_dir, llm_service, cache_manager
-        )
-        scaffolding_blueprint = blueprint_agent.blueprint(
-            classification.get("source", []) or [],
-            architecture_map,
-            target_language=target_lang,
-            target_framework=target_framework,
-            dependencies=snapshot_dependencies,
-        )
-        logging.info(
-            "Blueprint prepared %d scaffolding entries",
-            len(scaffolding_blueprint.get("entries", [])),
-        )
-
-        recovery_path = target_path / "migration_state.json"
-        recovery = RecoveryManager(recovery_path)
-        src_migrator = SourceMigrator(llm_service, cache_manager, recovery)
-        res_migrator = ResourceMigrator(llm_service, cache_manager)
-        dependency_resolver = DependencyResolver(
-            llm_service,
-            cache_manager,
-            download_root=target_path / "third_party",
-        )
-        dependency_resolution = dependency_resolver.resolve(
-            dependency_snapshot,
-            target_language=target_lang,
-            target_framework=target_framework,
-            perform_downloads=True,
-            target_project=target_path,
-        )
-        logging.info(
-            "Dependency resolver produced %d planned entries and %d downloads",
-            len(dependency_resolution.get("plan", {}).get("dependencies", []) or []),
-            len(dependency_resolution.get("downloads", []) or []),
-        )
-        rendered_manifests = dependency_resolution.get("rendered_manifests", []) or []
-        if rendered_manifests:
+        if mode == "heuristic":
+            detected_stack = (
+                {"language": src_lang, "framework": src_framework}
+                if src_lang or src_framework
+                else heuristic.detect_stack(source_files)
+            )
+            if not detected_stack:
+                raise RuntimeError("Impossibile determinare lo stack sorgente.")
             logging.info(
-                "Updated %d target manifests with dependency plan",
-                len(rendered_manifests),
+                "Detected source stack: language=%s framework=%s",
+                detected_stack.get("language"),
+                detected_stack.get("framework"),
             )
 
-        container_agent = ContainerizationAgent(llm_service, cache_manager)
-        container_plan = container_agent.generate(
-            target_language=target_lang,
-            target_framework=target_framework,
-            detected_stack=detected_stack,
-            dependencies=snapshot_dependencies,
-            architecture_map=architecture_map,
-        )
-        container_written = container_agent.persist(container_plan, target_path)
-        if container_written:
-            container_plan.written_files = container_written
+            graph = SemanticGraphBuilder()
+            graph.add_nodes(source_files)
+            plan = PlanningAgent().create_plan({}, source_files)
+            logging.info("Planning produced %d source artefacts", len(plan))
 
-        compatibility_agent = CompatibilitySearchAgent(
-            temp_dir, llm_service, cache_manager
-        )
-        compatibility_report = compatibility_agent.suggest(
-            source_files=classification.get("source", []) or [],
-            dependencies=snapshot_dependencies,
-            target_language=target_lang,
-            target_framework=target_framework,
-        )
-        logging.info(
-            "Compatibility agent produced %d guidance entries",
-            len(compatibility_report.get("entries", [])),
-        )
-
-        logging.info("Beginning source translation for %d files", len(plan))
-        for index, src in enumerate(plan, start=1):
-            source_file = temp_dir / src
-            if not source_file.exists():
-                recovery.mark_skipped(src)
-                logging.warning("Source file %s missing from archive; marked skipped", src)
-                continue
-
-            arch_entry = architecture_map.get(src, {})
-            destination_rel = arch_entry.get("target_path") if arch_entry else None
-            if destination_rel:
-                destination = target_path / destination_rel
-            else:
-                destination = target_path / "src" / Path(src).with_suffix(".java").name
+            project_stats = _collect_project_stats(temp_dir, plan)
             logging.info(
-                "[%d/%d] Translating source artefact %s -> %s",
-                index,
-                len(plan),
-                source_file,
-                destination,
+                "Project statistics: files=%d total_lines=%d max_file_lines=%d",
+                project_stats.get("total_files", 0),
+                project_stats.get("total_lines", 0),
+                project_stats.get("max_file_lines", 0),
             )
-            src_migrator.translate_legacy_backend(
-                source_file,
-                destination,
+
+            architecture_planner = ArchitecturePlanner(
+                temp_dir, llm_service, cache_manager
+            )
+            architecture_map = architecture_planner.propose(
+                plan,
                 target_language=target_lang,
                 target_framework=target_framework,
-                target_package=arch_entry.get("package") if arch_entry else None,
-                architecture_notes=arch_entry.get("notes") if arch_entry else None,
-                page_size=page_size,
-                refine_passes=refine_passes,
-                safe_mode=safe_mode,
-                project_stats=project_stats,
+                project_name=project_name,
             )
-
-        logging.info(
-            "Source translation complete; processing %d resource files",
-            len(resource_files),
-        )
-        for res in classification.get("resource", []):
-            resource_path = temp_dir / res
-            if resource_path.exists():
-                logging.info("Adapting resource %s", resource_path)
-                res_migrator.process(resource_path, target_path / "resources")
-            else:
-                logging.warning("Resource file %s missing from archive; skipping", res)
-
-        for entry in scaffolding_blueprint.get("entries", []):
-            if not isinstance(entry, Mapping):
-                continue
-            if not entry.get("requires_stub"):
-                continue
-            stub_info = _create_stub_file(
-                target_path,
-                entry,
-                target_language=target_lang,
-            )
-            stub_info["requires_stub"] = True
-            stub_results.append(stub_info)
-        if stub_results:
             logging.info(
-                "Generated %d scaffolding stubs for manual completion",
-                sum(1 for item in stub_results if item.get("created")),
+                "Architecture planner prepared %d mappings", len(architecture_map)
             )
+
+            scaffold_agent = ScaffoldingAgent(llm_service, cache_manager)
+            target_path = scaffold_agent.generate(
+                output_root, project_name, target_framework, target_lang
+            )
+            logging.info("Scaffold generated at %s", target_path)
+
+            dependency_agent = DependencyAnalysisAgent(
+                temp_dir, llm_service, cache_manager
+            )
+            dependency_snapshot = dependency_agent.extract_dependencies(
+                target_language=target_lang,
+                target_framework=target_framework,
+            )
+            snapshot_dependencies = dependency_snapshot.get("dependencies", []) or []
+            logging.info(
+                "Dependency snapshot captured %d dependencies across %d manifests",
+                len(snapshot_dependencies),
+                len(dependency_snapshot.get("manifests", []) or []),
+            )
+
+            blueprint_agent = ScaffoldingBlueprintAgent(
+                temp_dir, llm_service, cache_manager
+            )
+            scaffolding_blueprint = blueprint_agent.blueprint(
+                source_files,
+                architecture_map,
+                target_language=target_lang,
+                target_framework=target_framework,
+                dependencies=snapshot_dependencies,
+            )
+            logging.info(
+                "Blueprint prepared %d scaffolding entries",
+                len(scaffolding_blueprint.get("entries", [])),
+            )
+
+            recovery_path = target_path / "migration_state.json"
+            recovery = RecoveryManager(recovery_path)
+            src_migrator = SourceMigrator(llm_service, cache_manager, recovery)
+            res_migrator = ResourceMigrator(llm_service, cache_manager)
+            dependency_resolver = DependencyResolver(
+                llm_service,
+                cache_manager,
+                download_root=target_path / "third_party",
+            )
+            dependency_resolution = dependency_resolver.resolve(
+                dependency_snapshot,
+                target_language=target_lang,
+                target_framework=target_framework,
+                perform_downloads=True,
+                target_project=target_path,
+            )
+            logging.info(
+                "Dependency resolver produced %d planned entries and %d downloads",
+                len(dependency_resolution.get("plan", {}).get("dependencies", []) or []),
+                len(dependency_resolution.get("downloads", []) or []),
+            )
+            rendered_manifests = dependency_resolution.get("rendered_manifests", []) or []
+            if rendered_manifests:
+                logging.info(
+                    "Updated %d target manifests with dependency plan",
+                    len(rendered_manifests),
+                )
+
+            container_agent = ContainerizationAgent(llm_service, cache_manager)
+            container_plan = container_agent.generate(
+                target_language=target_lang,
+                target_framework=target_framework,
+                detected_stack=detected_stack,
+                dependencies=snapshot_dependencies,
+                architecture_map=architecture_map,
+            )
+            container_written = container_agent.persist(container_plan, target_path)
+            if container_written:
+                container_plan.written_files = container_written
+            containerization_payload = container_plan.to_payload()
+
+            compatibility_agent = CompatibilitySearchAgent(
+                temp_dir, llm_service, cache_manager
+            )
+            compatibility_report = compatibility_agent.suggest(
+                source_files=source_files,
+                dependencies=snapshot_dependencies,
+                target_language=target_lang,
+                target_framework=target_framework,
+            )
+            logging.info(
+                "Compatibility agent produced %d guidance entries",
+                len(compatibility_report.get("entries", [])),
+            )
+
+            logging.info(
+                "Beginning source translation for %d files", len(plan)
+            )
+            for index, src in enumerate(plan, start=1):
+                source_file = temp_dir / src
+                if not source_file.exists():
+                    recovery.mark_skipped(src)
+                    logging.warning(
+                        "Source file %s missing from archive; marked skipped", src
+                    )
+                    continue
+
+                arch_entry = architecture_map.get(src, {})
+                destination_rel = arch_entry.get("target_path") if arch_entry else None
+                if destination_rel:
+                    destination = target_path / destination_rel
+                else:
+                    destination = (
+                        target_path / "src" / Path(src).with_suffix(".java").name
+                    )
+                logging.info(
+                    "[%d/%d] Translating source artefact %s -> %s",
+                    index,
+                    len(plan),
+                    source_file,
+                    destination,
+                )
+                src_migrator.translate_legacy_backend(
+                    source_file,
+                    destination,
+                    target_language=target_lang,
+                    target_framework=target_framework,
+                    target_package=arch_entry.get("package") if arch_entry else None,
+                    architecture_notes=arch_entry.get("notes") if arch_entry else None,
+                    page_size=page_size,
+                    refine_passes=refine_passes,
+                    safe_mode=safe_mode,
+                    project_stats=project_stats,
+                )
+
+            logging.info(
+                "Source translation complete; processing %d resource files",
+                len(resource_files),
+            )
+            for res in resource_files:
+                resource_path = temp_dir / res
+                if resource_path.exists():
+                    logging.info("Adapting resource %s", resource_path)
+                    res_migrator.process(resource_path, target_path / "resources")
+                else:
+                    logging.warning(
+                        "Resource file %s missing from archive; skipping", res
+                    )
+
+            for entry in scaffolding_blueprint.get("entries", []):
+                if not isinstance(entry, Mapping):
+                    continue
+                if not entry.get("requires_stub"):
+                    continue
+                stub_info = _create_stub_file(
+                    target_path,
+                    entry,
+                    target_language=target_lang,
+                )
+                stub_info["requires_stub"] = True
+                stub_results.append(stub_info)
+            if stub_results:
+                logging.info(
+                    "Generated %d scaffolding stubs for manual completion",
+                    sum(1 for item in stub_results if item.get("created")),
+                )
+        else:
+            detected_stack = (
+                {"language": src_lang, "framework": src_framework}
+                if src_lang or src_framework
+                else heuristic.detect_stack(source_files)
+            ) or {"language": None, "framework": None}
+            logging.info(
+                "Static flow selected; proceeding with %d source files", len(source_files)
+            )
+
+            plan = list(source_files)
+            project_stats = _collect_project_stats(temp_dir, plan)
+            logging.info(
+                "Project statistics (static): files=%d total_lines=%d max_file_lines=%d",
+                project_stats.get("total_files", 0),
+                project_stats.get("total_lines", 0),
+                project_stats.get("max_file_lines", 0),
+            )
+
+            scaffold_agent = ScaffoldingAgent(llm_service, cache_manager)
+            target_path = scaffold_agent.generate(
+                output_root, project_name, target_framework, target_lang
+            )
+            logging.info("Static scaffold generated at %s", target_path)
+
+            recovery_path = target_path / "migration_state.json"
+            recovery = RecoveryManager(recovery_path)
+            src_migrator = SourceMigrator(llm_service, cache_manager, recovery)
+            res_migrator = ResourceMigrator(llm_service, cache_manager)
+
+            suffix_map = {
+                "java": ".java",
+                "c#": ".cs",
+                "csharp": ".cs",
+                "python": ".py",
+                "go": ".go",
+                "typescript": ".ts",
+                "javascript": ".js",
+                "node": ".js",
+                "scala": ".scala",
+                "kotlin": ".kt",
+                "swift": ".swift",
+                "php": ".php",
+                "ruby": ".rb",
+            }
+            normalized_lang = (target_lang or "").strip().lower()
+            target_suffix = suffix_map.get(normalized_lang)
+
+            logging.info(
+                "Beginning static source translation for %d files", len(plan)
+            )
+            for index, src in enumerate(plan, start=1):
+                source_file = temp_dir / src
+                if not source_file.exists():
+                    recovery.mark_skipped(src)
+                    logging.warning(
+                        "Source file %s missing from archive; marked skipped", src
+                    )
+                    continue
+
+                src_rel = Path(src)
+                destination_rel = (
+                    src_rel.with_suffix(target_suffix)
+                    if target_suffix
+                    else src_rel
+                )
+                destination = target_path / "src" / destination_rel
+                logging.info(
+                    "[%d/%d] (static) Translating %s -> %s",
+                    index,
+                    len(plan),
+                    source_file,
+                    destination,
+                )
+                src_migrator.translate_legacy_backend(
+                    source_file,
+                    destination,
+                    target_language=target_lang,
+                    target_framework=target_framework,
+                    target_package=None,
+                    architecture_notes=None,
+                    page_size=page_size,
+                    refine_passes=refine_passes,
+                    safe_mode=safe_mode,
+                    project_stats=project_stats,
+                )
+
+            logging.info(
+                "Static source translation complete; processing %d resource files",
+                len(resource_files),
+            )
+            for res in resource_files:
+                resource_path = temp_dir / res
+                if resource_path.exists():
+                    logging.info("Adapting resource %s", resource_path)
+                    res_migrator.process(resource_path, target_path / "resources")
+                else:
+                    logging.warning(
+                        "Resource file %s missing from archive; skipping", res
+                    )
+
+            dependency_snapshot = {
+                "dependencies": [],
+                "manifests": [],
+            }
+            dependency_resolution = {
+                "plan": {"dependencies": []},
+                "downloads": [],
+                "rendered_manifests": [],
+            }
+            scaffolding_blueprint = {"entries": []}
+            compatibility_report = {"entries": []}
+            containerization_payload = {
+                "mode": "static",
+                "written_files": [],
+            }
+            architecture_map = {}
+            # No additional stubs are generated in the static flow.
 
     token_usage = (
         llm_service.get_usage_summary()
@@ -665,6 +896,9 @@ def run_migration(
     if close_cache:
         cache_manager.close()
 
+    if not target_path or not recovery_path or not src_migrator:
+        raise RuntimeError("Migration pipeline did not complete successfully.")
+
     logging.info("Migration completed for %s", zip_path)
 
     pagination_report = {
@@ -684,7 +918,7 @@ def run_migration(
 
     return {
         "classification": classification,
-        "detected_stack": detected_stack,
+        "detected_stack": detected_stack or {"language": None, "framework": None},
         "plan": plan,
         "architecture": architecture_map,
         "scaffolding_blueprint": scaffolding_blueprint,
@@ -696,15 +930,15 @@ def run_migration(
         "dependencies": dependency_snapshot,
         "dependency_resolution": dependency_resolution,
         "compatibility": compatibility_report,
-        "containerization": container_plan.to_payload(),
+        "containerization": containerization_payload,
         "token_usage": token_usage,
         "cost_estimate": cost_estimate,
         "safe_mode": safe_mode,
         "pagination": pagination_report,
         "refinement": refinement_report,
         "source_archive": str(zip_path.resolve()),
+        "interpretation_mode": mode,
     }
-
 
 def create_app(
     llm: Optional[LLMService] = None,
@@ -1042,6 +1276,7 @@ def create_app(
             "pagination": migration.get("pagination"),
             "refinement": migration.get("refinement"),
             "error": None,
+            "interpretation_mode": migration.get("interpretation_mode"),
         }
         record = user_store.update_project(user_id, project_id, **metadata) or metadata
         app.logger.info(
@@ -1071,6 +1306,7 @@ def create_app(
         src_lang: Optional[str],
         src_framework: Optional[str],
         safe_mode: bool,
+        interpretation_mode: str,
     ) -> None:
         user_output_root = api_output_root / user_id / project_id
         user_output_root.mkdir(parents=True, exist_ok=True)
@@ -1098,6 +1334,7 @@ def create_app(
                     llm=llm_service,
                     cache=cache_manager,
                     safe_mode=safe_mode,
+                    interpretation_mode=interpretation_mode,
                 )
             except Exception as exc:  # noqa: BLE001
                 app.logger.exception("API migration failed for project %s", project_id)
@@ -1122,6 +1359,7 @@ def create_app(
         src_lang: Optional[str],
         src_framework: Optional[str],
         safe_mode: bool,
+        interpretation_mode: str,
     ) -> None:
         user_output_root = web_output_root / user_id / project_id
         user_output_root.mkdir(parents=True, exist_ok=True)
@@ -1149,6 +1387,7 @@ def create_app(
                     llm=llm_service,
                     cache=cache_manager,
                     safe_mode=safe_mode,
+                    interpretation_mode=interpretation_mode,
                 )
             except Exception as exc:  # noqa: BLE001
                 app.logger.exception("Web migration failed for project %s", project_id)
@@ -1312,7 +1551,13 @@ def create_app(
             "src_lang": request.form.get("src_lang", ""),
             "src_framework": request.form.get("src_framework", ""),
             "safe_mode": safe_mode_enabled,
+            "interpretation_mode": request.form.get("interpretation_mode", "heuristic"),
         }
+
+        defaults["interpretation_mode"] = (
+            (defaults.get("interpretation_mode") or "heuristic").strip().lower()
+            or "heuristic"
+        )
 
         user_id = session["user_id"]
 
@@ -1321,6 +1566,7 @@ def create_app(
             target_lang = defaults["target_lang"].strip() or "java"
             src_lang = defaults["src_lang"].strip() or None
             src_framework = defaults["src_framework"].strip() or None
+            interpretation_mode = defaults["interpretation_mode"]
             uploaded = request.files.get("source_zip")
 
             if not target_framework:
@@ -1329,6 +1575,11 @@ def create_app(
                 errors.append("You must upload a ZIP archive.")
             elif not uploaded.filename.lower().endswith(".zip"):
                 errors.append("Uploaded file must have .zip extension.")
+
+            if interpretation_mode not in {"heuristic", "static"}:
+                errors.append("Unsupported interpretation mode selected.")
+                interpretation_mode = "heuristic"
+            defaults["interpretation_mode"] = interpretation_mode
 
 
             project_record: Optional[Dict[str, Any]] = None
@@ -1343,6 +1594,7 @@ def create_app(
                         "queued_at": queued_at,
                         "safe_mode": safe_mode_enabled,
                         "error": None,
+                        "interpretation_mode": interpretation_mode,
                     }
                     project_record = user_store.create_project(
                         user_id,
@@ -1365,6 +1617,7 @@ def create_app(
                             error=None,
                             queued_at=project_record.get("queued_at", queued_at),
                             safe_mode=safe_mode_enabled,
+                            interpretation_mode=interpretation_mode,
                         )
                         _schedule_web_migration(
                             user_id=user_id,
@@ -1375,6 +1628,7 @@ def create_app(
                             src_lang=src_lang,
                             src_framework=src_framework,
                             safe_mode=safe_mode_enabled,
+                            interpretation_mode=interpretation_mode,
                         )
                         result_payload = {
                             "project_id": project_record.get("id"),
@@ -1594,6 +1848,15 @@ def create_app(
         if safe_mode_value is not None:
             safe_mode_enabled = str(safe_mode_value).lower() not in {"0", "false", "off", "no"}
 
+        interpretation_mode = (
+            request.form.get("interpretation_mode")
+            or request.values.get("interpretation_mode")
+            or "heuristic"
+        )
+        interpretation_mode = (interpretation_mode or "heuristic").strip().lower()
+        if interpretation_mode not in {"heuristic", "static"}:
+            return ({"error": "interpretation_mode must be 'heuristic' or 'static'."}, 400)
+
         if uploaded is None or uploaded.filename == "":
             return ({"error": "A ZIP archive must be provided."}, 400)
         if not uploaded.filename.lower().endswith(".zip"):
@@ -1605,6 +1868,7 @@ def create_app(
             "safe_mode": safe_mode_enabled,
             "queued_at": _timestamp(),
             "error": None,
+            "interpretation_mode": interpretation_mode,
         }
 
         project_record = user_store.create_project(
@@ -1632,6 +1896,7 @@ def create_app(
             src_lang=src_lang,
             src_framework=src_framework,
             safe_mode=safe_mode_enabled,
+            interpretation_mode=interpretation_mode,
         )
 
         response = {
@@ -1665,6 +1930,12 @@ def main() -> None:
         default=True,
         help="Enable fallback guardrails to reissue risky chunks with stricter prompts (enabled by default).",
     )
+    parser.add_argument(
+        "--interpretation-mode",
+        choices=["heuristic", "static"],
+        default="heuristic",
+        help="Select the code interpretation strategy for translations.",
+    )
 
     args = parser.parse_args()
 
@@ -1697,6 +1968,7 @@ def main() -> None:
             llm=llm,
             cache=cache,
             safe_mode=args.safe_mode,
+            interpretation_mode=args.interpretation_mode,
         )
     finally:
         cache.close()
