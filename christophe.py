@@ -3,6 +3,8 @@ from __future__ import annotations
 """CLI and web front-end for the migration orchestrator."""
 """oh gioia ch'io conobbi, essere amato, amando!"""
 
+import base64
+import binascii
 import json
 import logging
 import os
@@ -12,7 +14,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
 from analysis.compatibility_agent import CompatibilitySearchAgent
 from analysis.dependency_agent import DependencyAnalysisAgent
@@ -27,6 +29,7 @@ from core.cost_model import (
 )
 from core.file_utils import secure_unzip
 from core.llm_service import LLMService
+from core.stats_store import StatsStore
 from core.user_store import UserStore
 from migration.dependency_resolver import DependencyResolver
 from migration.recovery_manager import RecoveryManager
@@ -707,8 +710,10 @@ def create_app(
 
     from flask import (
         Flask,
+        Response,
         abort,
         g,
+        jsonify,
         redirect,
         render_template,
         request,
@@ -719,7 +724,57 @@ def create_app(
     from werkzeug.utils import secure_filename
 
     template_dir = Path(__file__).resolve().with_name("templates")
-    app = Flask(__name__, template_folder=str(template_dir))
+    static_dir = template_dir.with_name("static")
+
+    raw_root_prefix, _ = _resolve_env(
+        f"{ENV_PREFIX}_WEB_ROOT_PATH",
+        legacy=f"{LEGACY_PREFIX}_WEB_ROOT_PATH",
+    )
+    root_prefix = (raw_root_prefix or "").strip()
+    if root_prefix in {"", "/"}:
+        root_prefix = ""
+    elif not root_prefix.startswith("/"):
+        root_prefix = f"/{root_prefix.lstrip('/')}"
+    else:
+        root_prefix = f"/{root_prefix.strip('/')}"
+
+    app = Flask(
+        __name__,
+        template_folder=str(template_dir),
+        static_folder=str(static_dir),
+        static_url_path="/static",
+    )
+
+    if root_prefix:
+        app.config["APPLICATION_ROOT"] = root_prefix
+
+        class _PrefixMiddleware:
+            def __init__(self, app: Callable[..., Any], prefix: str) -> None:
+                self.app = app
+                self.prefix = prefix
+
+            def __call__(
+                self, environ: Dict[str, Any], start_response: Callable[..., Any]
+            ) -> Iterable[bytes]:
+                path_info = environ.get("PATH_INFO", "") or "/"
+                if path_info.startswith(self.prefix):
+                    trimmed = path_info[len(self.prefix) :]
+                    existing_script = environ.get("SCRIPT_NAME", "")
+                    if existing_script.endswith(self.prefix):
+                        environ["SCRIPT_NAME"] = existing_script
+                    else:
+                        combined = f"{existing_script.rstrip('/')}{self.prefix}"
+                        environ["SCRIPT_NAME"] = combined or self.prefix
+                    environ["PATH_INFO"] = trimmed or "/"
+                    return self.app(environ, start_response)
+
+                start_response(
+                    "404 NOT FOUND",
+                    [("Content-Type", "text/plain; charset=utf-8")],
+                )
+                return [b"Not Found"]
+
+        app.wsgi_app = _PrefixMiddleware(app.wsgi_app, root_prefix)
     secret_value, _ = _resolve_env(
         f"{ENV_PREFIX}_WEB_SECRET",
         legacy=f"{LEGACY_PREFIX}_WEB_SECRET",
@@ -806,6 +861,13 @@ def create_app(
     )
     store_path = Path(store_value or ".cache/users.json")
     user_store = UserStore(store_path)
+
+    stats_value, _ = _resolve_env(
+        f"{ENV_PREFIX}_STATS_STORE",
+        legacy=f"{LEGACY_PREFIX}_STATS_STORE",
+    )
+    stats_path = Path(stats_value or ".cache/stats.json")
+    stats_store = StatsStore(stats_path)
 
     def _timestamp() -> str:
         return datetime.utcnow().isoformat(timespec="seconds") + "Z"
@@ -1049,19 +1111,59 @@ def create_app(
 
 
 
+    def _client_ip() -> str:
+        forwarded_for = request.headers.get("X-Forwarded-For", "")
+        if forwarded_for:
+            candidate = forwarded_for.split(",", 1)[0].strip()
+            if candidate:
+                return candidate
+        remote_addr = request.remote_addr
+        if remote_addr:
+            return remote_addr
+        return "unknown"
+
+    def _log_visit(logged_in: bool) -> None:
+        try:
+            stats_store.record(_client_ip(), request.path or "/", logged_in)
+        except Exception:  # noqa: BLE001
+            app.logger.exception("Unable to record visit statistics")
+
+    def _check_stats_auth() -> bool:
+        header = request.headers.get("Authorization", "")
+        if not header.lower().startswith("basic "):
+            return False
+        try:
+            encoded = header.split(" ", 1)[1]
+            decoded = base64.b64decode(encoded).decode("utf-8")
+        except (IndexError, binascii.Error, UnicodeDecodeError):
+            return False
+        username, _, password = decoded.partition(":")
+        return username == "raspberry3" and password == "cecinestpasunpipe"
+
     @app.before_request
     def load_user() -> None:
         user_id = session.get("user_id")
         g.user = None
         g.auth_token = None
         if not user_id:
+            _log_visit(False)
             return
         user = user_store.get_user(user_id)
         if not user:
             session.clear()
+            _log_visit(False)
             return
         g.user = user
         g.auth_token = user.get("token")
+        _log_visit(True)
+
+    @app.route("/stats/visitors", methods=["GET"])
+    def stats_visitors():
+        if not _check_stats_auth():
+            response = Response("Authentication required", 401)
+            response.headers["WWW-Authenticate"] = 'Basic realm="Ernest Stats"'
+            return response
+        return jsonify({"visitors": stats_store.snapshot()})
 
     @app.route("/logout")
     def logout():
