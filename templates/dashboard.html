@@ -166,11 +166,91 @@
             border: 1px solid var(--border);
             box-shadow: 0 24px 48px rgba(14, 27, 42, 0.12);
             flex-shrink: 0;
+            cursor: pointer;
+            position: relative;
+            transform-origin: center;
+            transition: transform 0.28s ease, box-shadow 0.28s ease;
+        }
+
+        .brand-icon:focus-visible {
+            outline: 3px solid var(--blue);
+            outline-offset: 6px;
         }
 
         .brand-icon img {
             width: 72px;
             height: 72px;
+            transition: transform 0.28s ease;
+        }
+
+        .brand-icon.is-spotlight-source {
+            transform: scale(1.05);
+            box-shadow: 0 32px 64px rgba(14, 27, 42, 0.18);
+        }
+
+        .brand-icon.is-spotlight-source img {
+            transform: scale(1.05);
+        }
+
+        .logo-spotlight {
+            position: fixed;
+            inset: 0;
+            display: grid;
+            place-items: center;
+            padding: 8vmin;
+            pointer-events: none;
+            opacity: 0;
+            transform: scale(0.97);
+            transition: opacity 0.35s ease, transform 0.35s ease;
+            z-index: 2400;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .logo-spotlight {
+                transition: none;
+            }
+        }
+
+        .logo-spotlight.is-visible {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .logo-spotlight__backdrop {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at center, rgba(58, 166, 233, 0.14), rgba(14, 27, 42, 0.72));
+            opacity: 0.88;
+        }
+
+        .logo-spotlight__shell {
+            position: relative;
+            width: min(420px, 60vmin);
+            aspect-ratio: 1 / 1;
+            border-radius: 40px;
+            background: var(--surface);
+            border: 1px solid rgba(255, 255, 255, 0.24);
+            box-shadow: 0 60px 120px rgba(14, 27, 42, 0.45);
+            display: grid;
+            place-items: center;
+            overflow: hidden;
+        }
+
+        .logo-spotlight__shell::after {
+            content: "";
+            position: absolute;
+            inset: 14%;
+            border-radius: 24px;
+            background: radial-gradient(circle at top, rgba(58, 166, 233, 0.22), transparent 70%);
+            filter: blur(0.5px);
+            z-index: 0;
+        }
+
+        .logo-spotlight__shell img {
+            position: relative;
+            width: 64%;
+            height: 64%;
+            z-index: 1;
         }
 
         .account {
@@ -635,7 +715,7 @@
     </a>
     <div class="layout">
         <header class="portal-header">
-            <div class="brand-icon">
+            <div class="brand-icon" role="button" tabindex="0" aria-label="{{ brand_name }} logo">
                 <img src="{{ url_for('static', filename='img/ernest-mark.svg') }}" alt="{{ brand_name }} logo">
             </div>
             <div>
@@ -1282,6 +1362,100 @@
                     applyData(partitioned.pending, partitioned.completed);
                 });
             }
+        })();
+    </script>
+    <script>
+        (function () {
+            const logo = document.querySelector('.brand-icon');
+            if (!logo) {
+                return;
+            }
+
+            const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            const baseImage = logo.querySelector('img');
+            let spotlight = null;
+
+            const ensureSpotlight = () => {
+                if (spotlight || !baseImage) {
+                    return spotlight;
+                }
+
+                const overlay = document.createElement('div');
+                overlay.className = 'logo-spotlight';
+
+                const backdrop = document.createElement('div');
+                backdrop.className = 'logo-spotlight__backdrop';
+                overlay.appendChild(backdrop);
+
+                const shell = document.createElement('div');
+                shell.className = 'logo-spotlight__shell';
+                const clone = baseImage.cloneNode(true);
+                clone.removeAttribute('alt');
+                clone.setAttribute('aria-hidden', 'true');
+                shell.appendChild(clone);
+                overlay.appendChild(shell);
+
+                document.body.appendChild(overlay);
+                spotlight = overlay;
+
+                requestAnimationFrame(() => {
+                    overlay.classList.add('is-visible');
+                });
+
+                return overlay;
+            };
+
+            const removeSpotlight = () => {
+                if (!spotlight) {
+                    return;
+                }
+
+                const overlay = spotlight;
+                spotlight = null;
+
+                const finalize = () => {
+                    overlay.remove();
+                };
+
+                overlay.classList.remove('is-visible');
+
+                if (prefersReducedMotion) {
+                    finalize();
+                } else {
+                    overlay.addEventListener('transitionend', finalize, { once: true });
+                }
+            };
+
+            const showSpotlight = () => {
+                logo.classList.add('is-spotlight-source');
+                ensureSpotlight();
+            };
+
+            const hideSpotlight = () => {
+                logo.classList.remove('is-spotlight-source');
+                removeSpotlight();
+            };
+
+            const closeTab = (event) => {
+                event.preventDefault();
+                hideSpotlight();
+                window.close();
+            };
+
+            logo.addEventListener('mouseenter', showSpotlight);
+            logo.addEventListener('mouseleave', hideSpotlight);
+            logo.addEventListener('focus', showSpotlight);
+            logo.addEventListener('blur', hideSpotlight);
+            logo.addEventListener('touchstart', showSpotlight, { passive: true });
+            logo.addEventListener('touchend', hideSpotlight, { passive: true });
+            logo.addEventListener('touchcancel', hideSpotlight, { passive: true });
+
+            logo.addEventListener('click', closeTab);
+            logo.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
+                    closeTab(event);
+                }
+            });
         })();
     </script>
 </body>
