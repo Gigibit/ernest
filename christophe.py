@@ -3,6 +3,8 @@ from __future__ import annotations
 """CLI and web front-end for the migration orchestrator."""
 """oh gioia ch'io conobbi, essere amato, amando!"""
 
+import base64
+import binascii
 import json
 import logging
 import os
@@ -12,7 +14,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
 from analysis.compatibility_agent import CompatibilitySearchAgent
 from analysis.dependency_agent import DependencyAnalysisAgent
@@ -27,11 +29,13 @@ from core.cost_model import (
 )
 from core.file_utils import secure_unzip
 from core.llm_service import LLMService
+from core.stats_store import StatsStore
 from core.user_store import UserStore
 from migration.dependency_resolver import DependencyResolver
 from migration.recovery_manager import RecoveryManager
 from migration.resource_migrator import ResourceMigrator
 from migration.source_migrator import SourceMigrator
+from editor import LiveEditorAgent
 from planning.architecture_agent import ArchitecturePlanner
 from planning.containerization_agent import ContainerizationAgent
 from planning.scaffolding_blueprint_agent import ScaffoldingBlueprintAgent
@@ -41,6 +45,10 @@ from scaffolding.scaffolding_agent import ScaffoldingAgent
 
 ENV_PREFIX = "ERNEST"
 LEGACY_PREFIX = "CHRISTOPHE"
+
+
+MAX_EDITOR_PREVIEW_BYTES = 512 * 1024  # 512 KB per file preview
+EDITOR_MANIFEST_LIMIT = 2000
 
 
 DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
@@ -54,6 +62,7 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
     "dependency": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1536, "temp": 0.0},
     "compatibility": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1536, "temp": 0.0},
     "blueprint": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1536, "temp": 0.0},
+    "editor": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 2048, "temp": 0.0},
 }
 
 
@@ -702,13 +711,17 @@ def create_app(
     cache: Optional[CacheManager] = None,
     *,
     output_root: Optional[Path] = None,
+    user_store: Optional[UserStore] = None,
+    stats_store: Optional[StatsStore] = None,
 ) -> "Flask":
     """Create a Flask application exposing the migration pipeline with auth."""
 
     from flask import (
         Flask,
+        Response,
         abort,
         g,
+        jsonify,
         redirect,
         render_template,
         request,
@@ -719,7 +732,57 @@ def create_app(
     from werkzeug.utils import secure_filename
 
     template_dir = Path(__file__).resolve().with_name("templates")
-    app = Flask(__name__, template_folder=str(template_dir))
+    static_dir = template_dir.with_name("static")
+
+    raw_root_prefix, _ = _resolve_env(
+        f"{ENV_PREFIX}_WEB_ROOT_PATH",
+        legacy=f"{LEGACY_PREFIX}_WEB_ROOT_PATH",
+    )
+    root_prefix = (raw_root_prefix or "").strip()
+    if root_prefix in {"", "/"}:
+        root_prefix = ""
+    elif not root_prefix.startswith("/"):
+        root_prefix = f"/{root_prefix.lstrip('/')}"
+    else:
+        root_prefix = f"/{root_prefix.strip('/')}"
+
+    app = Flask(
+        __name__,
+        template_folder=str(template_dir),
+        static_folder=str(static_dir),
+        static_url_path="/static",
+    )
+
+    if root_prefix:
+        app.config["APPLICATION_ROOT"] = root_prefix
+
+        class _PrefixMiddleware:
+            def __init__(self, app: Callable[..., Any], prefix: str) -> None:
+                self.app = app
+                self.prefix = prefix
+
+            def __call__(
+                self, environ: Dict[str, Any], start_response: Callable[..., Any]
+            ) -> Iterable[bytes]:
+                path_info = environ.get("PATH_INFO", "") or "/"
+                if path_info.startswith(self.prefix):
+                    trimmed = path_info[len(self.prefix) :]
+                    existing_script = environ.get("SCRIPT_NAME", "")
+                    if existing_script.endswith(self.prefix):
+                        environ["SCRIPT_NAME"] = existing_script
+                    else:
+                        combined = f"{existing_script.rstrip('/')}{self.prefix}"
+                        environ["SCRIPT_NAME"] = combined or self.prefix
+                    environ["PATH_INFO"] = trimmed or "/"
+                    return self.app(environ, start_response)
+
+                start_response(
+                    "404 NOT FOUND",
+                    [("Content-Type", "text/plain; charset=utf-8")],
+                )
+                return [b"Not Found"]
+
+        app.wsgi_app = _PrefixMiddleware(app.wsgi_app, root_prefix)
     secret_value, _ = _resolve_env(
         f"{ENV_PREFIX}_WEB_SECRET",
         legacy=f"{LEGACY_PREFIX}_WEB_SECRET",
@@ -779,6 +842,9 @@ def create_app(
 
     llm_service = llm or LLMService(_resolved_profiles())
     cache_manager = cache or CacheManager(Path(".cache/migration_cache.db"))
+    app.config["ERNEST_LLM_SERVICE"] = llm_service
+    app.config["ERNEST_CACHE_MANAGER"] = cache_manager
+    app.config["ERNEST_LIVE_EDITOR_AGENT"] = LiveEditorAgent(llm_service)
     worker_value, worker_env = _resolve_env(
         f"{ENV_PREFIX}_WORKERS",
         legacy=f"{LEGACY_PREFIX}_WORKERS",
@@ -799,16 +865,98 @@ def create_app(
     api_output_root = base_output_root / "api"
     web_output_root.mkdir(parents=True, exist_ok=True)
     api_output_root.mkdir(parents=True, exist_ok=True)
+    app.config.setdefault("ERNEST_OUTPUT_ROOT", base_output_root)
+    app.config.setdefault("ERNEST_WEB_OUTPUT_ROOT", web_output_root)
+    app.config.setdefault("ERNEST_API_OUTPUT_ROOT", api_output_root)
 
     store_value, _ = _resolve_env(
         f"{ENV_PREFIX}_USER_STORE",
         legacy=f"{LEGACY_PREFIX}_USER_STORE",
     )
     store_path = Path(store_value or ".cache/users.json")
-    user_store = UserStore(store_path)
+    user_store = user_store or UserStore(store_path)
+    app.config.setdefault("ERNEST_USER_STORE", user_store)
+
+    stats_value, _ = _resolve_env(
+        f"{ENV_PREFIX}_STATS_STORE",
+        legacy=f"{LEGACY_PREFIX}_STATS_STORE",
+    )
+    stats_path = Path(stats_value or ".cache/stats.json")
+    stats_store = stats_store or StatsStore(stats_path)
+    app.config.setdefault("ERNEST_STATS_STORE", stats_store)
 
     def _timestamp() -> str:
         return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+    def _is_text_file(candidate: Path) -> bool:
+        try:
+            with candidate.open("rb") as handle:
+                sample = handle.read(4096)
+        except OSError:
+            return False
+        if not sample:
+            return True
+        if b"\x00" in sample:
+            return False
+        try:
+            sample.decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+        return True
+
+    def _scan_project_files(base_path: Path) -> Tuple[list[Dict[str, Any]], bool]:
+        manifest: list[Dict[str, Any]] = []
+        truncated = False
+        root = base_path.resolve()
+        try:
+            candidates = sorted(root.rglob("*"), key=lambda item: item.as_posix())
+        except OSError:
+            return manifest, truncated
+        for entry in candidates:
+            if not entry.is_file():
+                continue
+            try:
+                stat_info = entry.stat()
+            except OSError:
+                continue
+            rel_path = entry.relative_to(root).as_posix()
+            is_text = _is_text_file(entry)
+            size = int(stat_info.st_size)
+            manifest.append(
+                {
+                    "path": rel_path,
+                    "size": size,
+                    "is_text": is_text,
+                    "previewable": bool(is_text and size <= MAX_EDITOR_PREVIEW_BYTES),
+                }
+            )
+            if len(manifest) >= EDITOR_MANIFEST_LIMIT:
+                truncated = True
+                break
+        return manifest, truncated
+
+    def _resolve_project_output(
+        user_id: str, project_id: str
+    ) -> Tuple[Dict[str, Any], Path]:
+        project = user_store.get_project(user_id, project_id)
+        if not project or project.get("status") != "completed":
+            abort(404)
+        output_path = project.get("output_path")
+        if not output_path:
+            abort(404)
+        output_dir = Path(output_path)
+        if not output_dir.exists() or not output_dir.is_dir():
+            abort(404)
+        return project, output_dir
+
+    def _resolve_editor_file(base: Path, requested_path: str) -> Path:
+        candidate = (base / requested_path).resolve()
+        base_resolved = base.resolve()
+        if base_resolved not in candidate.parents:
+            abort(404)
+        if not candidate.exists() or not candidate.is_file():
+            abort(404)
+        return candidate
 
     def _extract_token(req: Any) -> Optional[str]:
         header = req.headers.get("Authorization", "") if hasattr(req, "headers") else ""
@@ -1039,6 +1187,11 @@ def create_app(
                 entry["download_url"] = url_for(
                     "api_download_project", project_id=entry["id"]
                 )
+                output_path = entry.get("output_path")
+                if output_path and Path(output_path).exists():
+                    entry["editor_url"] = url_for(
+                        "project_editor", project_id=entry["id"]
+                    )
                 completed.append(entry)
             else:
                 pending.append(entry)
@@ -1049,19 +1202,59 @@ def create_app(
 
 
 
+    def _client_ip() -> str:
+        forwarded_for = request.headers.get("X-Forwarded-For", "")
+        if forwarded_for:
+            candidate = forwarded_for.split(",", 1)[0].strip()
+            if candidate:
+                return candidate
+        remote_addr = request.remote_addr
+        if remote_addr:
+            return remote_addr
+        return "unknown"
+
+    def _log_visit(logged_in: bool) -> None:
+        try:
+            stats_store.record(_client_ip(), request.path or "/", logged_in)
+        except Exception:  # noqa: BLE001
+            app.logger.exception("Unable to record visit statistics")
+
+    def _check_stats_auth() -> bool:
+        header = request.headers.get("Authorization", "")
+        if not header.lower().startswith("basic "):
+            return False
+        try:
+            encoded = header.split(" ", 1)[1]
+            decoded = base64.b64decode(encoded).decode("utf-8")
+        except (IndexError, binascii.Error, UnicodeDecodeError):
+            return False
+        username, _, password = decoded.partition(":")
+        return username == "raspberry3" and password == "cecinestpasunpipe"
+
     @app.before_request
     def load_user() -> None:
         user_id = session.get("user_id")
         g.user = None
         g.auth_token = None
         if not user_id:
+            _log_visit(False)
             return
         user = user_store.get_user(user_id)
         if not user:
             session.clear()
+            _log_visit(False)
             return
         g.user = user
         g.auth_token = user.get("token")
+        _log_visit(True)
+
+    @app.route("/stats/visitors", methods=["GET"])
+    def stats_visitors():
+        if not _check_stats_auth():
+            response = Response("Authentication required", 401)
+            response.headers["WWW-Authenticate"] = 'Basic realm="Ernest Stats"'
+            return response
+        return jsonify({"visitors": stats_store.snapshot()})
 
     @app.route("/logout")
     def logout():
@@ -1213,6 +1406,76 @@ def create_app(
         download_name = project.get("download_name") or Path(archive_path).name
         return send_file(archive_path, as_attachment=True, download_name=download_name)
 
+    @app.route("/projects/<project_id>/editor")
+    def project_editor(project_id: str):
+        if not g.get("user"):
+            return redirect(url_for("auth"))
+        project, _ = _resolve_project_output(session["user_id"], project_id)
+        manifest_url = url_for("project_editor_manifest", project_id=project_id)
+        file_url_template = url_for(
+            "project_editor_file", project_id=project_id, requested="__PATH__"
+        )
+        apply_url = url_for("project_editor_apply", project_id=project_id)
+        return render_template(
+            "editor.html",
+            project=project,
+            manifest_url=manifest_url,
+            file_url_template=file_url_template,
+            apply_url=apply_url,
+        )
+
+    @app.route("/projects/<project_id>/editor/manifest", methods=["GET"])
+    def project_editor_manifest(project_id: str):
+        if not g.get("user"):
+            return redirect(url_for("auth"))
+        _, output_dir = _resolve_project_output(session["user_id"], project_id)
+        manifest, truncated = _scan_project_files(output_dir)
+        return jsonify({"files": manifest, "truncated": truncated})
+
+    @app.route(
+        "/projects/<project_id>/editor/files/<path:requested>", methods=["GET"]
+    )
+    def project_editor_file(project_id: str, requested: str):
+        if not g.get("user"):
+            return redirect(url_for("auth"))
+        _, output_dir = _resolve_project_output(session["user_id"], project_id)
+        file_path = _resolve_editor_file(output_dir, requested)
+        size = file_path.stat().st_size
+        if size > MAX_EDITOR_PREVIEW_BYTES:
+            return jsonify({"error": "File too large for live preview."}), 413
+        if not _is_text_file(file_path):
+            return jsonify({"error": "Binary files cannot be previewed."}), 415
+        with file_path.open("r", encoding="utf-8", errors="replace") as handle:
+            content = handle.read()
+        return jsonify({"path": requested, "size": int(size), "content": content})
+
+    @app.route("/projects/<project_id>/editor/apply", methods=["POST"])
+    def project_editor_apply(project_id: str):
+        if not g.get("user"):
+            return redirect(url_for("auth"))
+        project, output_dir = _resolve_project_output(session["user_id"], project_id)
+        payload = request.get_json(silent=True) or {}
+        prompt = payload.get("prompt") if isinstance(payload, dict) else None
+        focus = payload.get("focus") if isinstance(payload, dict) else None
+        agent: LiveEditorAgent = app.config["ERNEST_LIVE_EDITOR_AGENT"]
+        try:
+            result = agent.apply_prompt(
+                output_dir,
+                prompt or "",
+                focus_path=focus if isinstance(focus, str) else None,
+                project_name=(
+                    project.get("name")
+                    or project.get("project_name")
+                    or project.get("id")
+                ),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception:
+            app.logger.exception("Failed to apply live editor prompt")
+            return jsonify({"error": "Unable to apply modifications."}), 500
+        return jsonify(result)
+
     @app.route("/api/auth", methods=["POST"])
     def api_auth():
         payload = request.get_json(silent=True) or {}
@@ -1256,6 +1519,13 @@ def create_app(
                     project_id=entry["id"],
                     _external=True,
                 )
+                output_path = entry.get("output_path")
+                if output_path and Path(output_path).exists():
+                    entry["editor_url"] = url_for(
+                        "project_editor",
+                        project_id=entry["id"],
+                        _external=True,
+                    )
             projects_payload.append(entry)
         return ({"projects": projects_payload}, 200)
 
