@@ -359,6 +359,96 @@
             outline: none;
         }
 
+        .option-group {
+            grid-column: 1 / -1;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            background: rgba(240, 249, 255, 0.5);
+            border-radius: 18px;
+            border: 1px solid rgba(148, 163, 184, 0.35);
+            padding: 18px 20px;
+        }
+
+        .option-group-label {
+            font-weight: 600;
+            color: var(--ink);
+        }
+
+        .option-group-hint {
+            font-size: 0.85rem;
+            color: var(--muted);
+        }
+
+        .option-group .options {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .option-card {
+            position: relative;
+            flex: 1 1 180px;
+            min-width: 160px;
+            border: 1px solid rgba(148, 163, 184, 0.6);
+            border-radius: 14px;
+            padding: 14px 16px 16px;
+            background: rgba(255, 255, 255, 0.9);
+            cursor: pointer;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+        }
+
+        .option-card:hover {
+            border-color: var(--blue);
+            box-shadow: 0 14px 32px rgba(15, 23, 42, 0.16);
+            transform: translateY(-1px);
+        }
+
+        .option-card input[type="radio"] {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .option-card .option-title {
+            font-weight: 600;
+            color: var(--ink);
+            display: block;
+        }
+
+        .option-card .option-description {
+            display: block;
+            margin-top: 6px;
+            font-size: 0.82rem;
+            color: var(--muted);
+        }
+
+        .option-card .option-marker {
+            display: none;
+            margin-top: 8px;
+            font-size: 0.75rem;
+            color: var(--blue-dark);
+            font-weight: 600;
+        }
+
+        .option-card input[type="radio"]:checked ~ .option-title {
+            color: var(--blue-dark);
+        }
+
+        .option-card input[type="radio"]:checked ~ .option-description {
+            color: var(--ink);
+        }
+
+        .option-card input[type="radio"]:checked ~ .option-marker {
+            display: inline-block;
+        }
+
+        .option-card input[type="radio"]:focus-visible {
+            outline: 2px solid rgba(58, 166, 233, 0.6);
+            outline-offset: 3px;
+        }
+
         .toggle {
             grid-column: 1 / -1;
             background: rgba(240, 249, 255, 0.9);
@@ -760,6 +850,24 @@
                         <label for="src_framework">Source framework (optional)</label>
                         <input id="src_framework" name="src_framework" type="text" value="{{ defaults.src_framework }}" placeholder="e.g. legacy ERP platform">
                     </div>
+                    <div class="option-group">
+                        <span class="option-group-label">Interpretation mode</span>
+                        <div class="option-group-hint">Choose how {{ brand_name }} analyses your source before translation.</div>
+                        <div class="options">
+                            <label class="option-card">
+                                <input type="radio" name="interpretation_mode" value="heuristic" {% if defaults.interpretation_mode != 'static' %}checked{% endif %}>
+                                <span class="option-title">Heuristic</span>
+                                <span class="option-description">Reads each class and method, explains their roles, and preserves behaviour when synthesising outputs.</span>
+                                <span class="option-marker">Selected</span>
+                            </label>
+                            <label class="option-card">
+                                <input type="radio" name="interpretation_mode" value="static" {% if defaults.interpretation_mode == 'static' %}checked{% endif %}>
+                                <span class="option-title">Static</span>
+                                <span class="option-description">Translates files sequentially without semantic aggregation or architectural synthesis.</span>
+                                <span class="option-marker">Selected</span>
+                            </label>
+                        </div>
+                    </div>
                     <div class="toggle">
                         <label class="checkbox-label" for="safe_mode">
                             <input id="safe_mode" name="safe_mode" type="checkbox" value="1" {% if defaults.safe_mode %}checked{% endif %}>
@@ -826,6 +934,7 @@
                             {% if project.completed_at %}<div class="detail-line"><strong>Finished:</strong> {{ project.completed_at }}</div>{% endif %}
                             {% if project.original_filename %}<div class="detail-line"><strong>Original file:</strong> {{ project.original_filename }}</div>{% endif %}
                             {% if project.download_name %}<div class="detail-line"><strong>Output:</strong> {{ project.download_name }}</div>{% endif %}
+                            {% if project.interpretation_mode %}<div class="detail-line"><strong>Interpretation:</strong> {{ project.interpretation_mode|capitalize }}</div>{% endif %}
                             {% if project.token_usage %}
                             <details class="detail-collapsible">
                                 <summary>Token usage</summary>
