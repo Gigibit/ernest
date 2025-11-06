@@ -121,6 +121,14 @@ Automatic refinement heuristics can also be tuned via:
 
 Unset variables fall back to sensible defaults tuned for 7B class models.
 
+## Visitor telemetry for previews
+
+The Flask preview records the IP address of every request and marks whether the
+visitor has completed the login flow. Aggregated statistics are persisted in
+`.cache/stats.json` by default (override via `ERNEST_STATS_STORE`) and exposed
+through the `/stats/visitors` endpoint. Access requires HTTP Basic Auth with the
+credentials `raspberry3` / `cecinestpasunpipe`.
+
 ## Safe mode fallback guardrails
 
 Safe mode is enabled by default and adds an automatic safety harness to the
