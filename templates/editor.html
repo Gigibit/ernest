@@ -78,14 +78,167 @@
         header {
             display: flex;
             align-items: center;
-            gap: 16px;
+            gap: 18px;
             padding: 24px 32px 18px;
             flex-shrink: 0;
         }
 
-        header img {
-            width: 48px;
-            height: 48px;
+        .brand-icon {
+            width: 62px;
+            height: 62px;
+            border-radius: 20px;
+            background: linear-gradient(160deg, rgba(255, 255, 255, 0.95), rgba(240, 244, 248, 0.75));
+            border: 1px solid rgba(26, 42, 58, 0.08);
+            display: grid;
+            place-items: center;
+            box-shadow: 0 18px 36px rgba(20, 35, 54, 0.18);
+            cursor: pointer;
+            transition: transform 0.28s ease, box-shadow 0.28s ease;
+        }
+
+        .brand-icon:focus-visible {
+            outline: 3px solid rgba(66, 139, 202, 0.55);
+            outline-offset: 4px;
+        }
+
+        .brand-icon img {
+            width: 44px;
+            height: 44px;
+            transition: transform 0.28s ease;
+        }
+
+        .brand-icon.is-spotlight-source {
+            transform: scale(1.05);
+            box-shadow: 0 26px 54px rgba(20, 35, 54, 0.28);
+        }
+
+        .brand-icon.is-spotlight-source img {
+            transform: scale(1.06);
+        }
+
+        .logo-spotlight {
+            position: fixed;
+            inset: 0;
+            display: grid;
+            place-items: center;
+            padding: 8vmin;
+            pointer-events: none;
+            opacity: 0;
+            transform: scale(0.97);
+            transition: opacity 0.35s ease, transform 0.35s ease;
+            z-index: 3000;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .logo-spotlight {
+                transition: none;
+            }
+            .logo-spotlight__shell,
+            .logo-spotlight__shell img,
+            .logo-spotlight__glyph,
+            .logo-spotlight__glyph::before,
+            .logo-spotlight__glyph::after {
+                transition: none;
+            }
+        }
+
+        .logo-spotlight.is-visible {
+            opacity: 1;
+            transform: scale(1);
+            pointer-events: auto;
+        }
+
+        .logo-spotlight__backdrop {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at center, rgba(66, 139, 202, 0.16), rgba(17, 27, 38, 0.78));
+            opacity: 0.92;
+        }
+
+        .logo-spotlight__shell {
+            position: relative;
+            width: min(400px, 58vmin);
+            aspect-ratio: 1 / 1;
+            border-radius: 36px;
+            background: rgba(255, 255, 255, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.28);
+            box-shadow: 0 60px 120px rgba(20, 35, 54, 0.46);
+            display: grid;
+            place-items: center;
+            overflow: hidden;
+            transition: transform 0.35s ease;
+        }
+
+        .logo-spotlight__shell.is-armed {
+            transform: rotate(2deg) scale(1.02);
+        }
+
+        .logo-spotlight__shell::after {
+            content: "";
+            position: absolute;
+            inset: 15%;
+            border-radius: 24px;
+            background: radial-gradient(circle at top, rgba(66, 139, 202, 0.22), transparent 70%);
+            filter: blur(0.5px);
+            z-index: 0;
+        }
+
+        .logo-spotlight__shell img {
+            position: relative;
+            width: 62%;
+            height: 62%;
+            z-index: 1;
+            transition: transform 0.38s ease, opacity 0.38s ease;
+        }
+
+        .logo-spotlight__shell.is-armed img {
+            transform: scale(0.7) rotate(-8deg);
+            opacity: 0;
+        }
+
+        .logo-spotlight__glyph {
+            position: absolute;
+            inset: 26%;
+            border-radius: 24px;
+            z-index: 2;
+            opacity: 0;
+            transform: scale(0.68) rotate(4deg);
+            transition: opacity 0.32s ease, transform 0.32s ease;
+        }
+
+        .logo-spotlight__glyph::before,
+        .logo-spotlight__glyph::after {
+            content: "";
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: 6px;
+            height: 100%;
+            border-radius: 999px;
+            background: linear-gradient(180deg, rgba(136, 192, 255, 0.92), rgba(12, 23, 40, 0.9));
+            transform-origin: center;
+            opacity: 0;
+            transform: translate(-50%, -50%) rotate(45deg) scaleY(0.35);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+
+        .logo-spotlight__glyph::after {
+            transform: translate(-50%, -50%) rotate(-45deg) scaleY(0.35);
+        }
+
+        .logo-spotlight__shell.is-armed .logo-spotlight__glyph {
+            opacity: 1;
+            transform: scale(1) rotate(0deg);
+        }
+
+        .logo-spotlight__shell.is-armed .logo-spotlight__glyph::before,
+        .logo-spotlight__shell.is-armed .logo-spotlight__glyph::after {
+            opacity: 1;
+            transform: translate(-50%, -50%) rotate(45deg) scaleY(1);
+        }
+
+        .logo-spotlight__shell.is-armed .logo-spotlight__glyph::after {
+            transform: translate(-50%, -50%) rotate(-45deg) scaleY(1);
         }
 
         header h1 {
@@ -466,7 +619,9 @@
         <div class="button paypal-button" aria-label="Dona via PayPal" onmouseover="this.style.transform='scale(1.05)';" onmouseout="this.style.transform='scale(1)';">Dona</div>
     </a>
     <header>
-        <img src="{{ url_for('static', filename='img/ernest-mark.svg') }}" alt="{{ brand_name }} logo">
+        <div class="brand-icon" role="button" tabindex="0" aria-label="{{ brand_name }} logo">
+            <img src="{{ url_for('static', filename='img/ernest-mark.svg') }}" alt="{{ brand_name }} logo">
+        </div>
         <div>
             <h1>{{ brand_name }} live editor</h1>
             <p class="subtitle">{{ project.name or project.project_name or project.id or 'Project' }}</p>
@@ -725,6 +880,148 @@
             });
 
             loadManifest();
+        })();
+    </script>
+    <script>
+        (function () {
+            const logo = document.querySelector('header .brand-icon');
+            if (!logo) {
+                return;
+            }
+
+            const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            const baseImage = logo.querySelector('img');
+            let spotlight = null;
+            let spotlightShell = null;
+
+            const hideSpotlight = () => {
+                if (!spotlight) {
+                    return;
+                }
+
+                const overlay = spotlight;
+                const shell = spotlightShell;
+
+                spotlight = null;
+                spotlightShell = null;
+
+                if (shell) {
+                    shell.classList.remove('is-armed');
+                }
+
+                const finalize = () => {
+                    overlay.remove();
+                };
+
+                overlay.classList.remove('is-visible');
+
+                if (prefersReducedMotion) {
+                    finalize();
+                } else {
+                    overlay.addEventListener('transitionend', finalize, { once: true });
+                }
+
+                logo.classList.remove('is-spotlight-source');
+            };
+
+            const closeTab = (event) => {
+                event.preventDefault();
+                hideSpotlight();
+                window.close();
+            };
+
+            const ensureSpotlight = () => {
+                if (spotlight || !baseImage) {
+                    return spotlight;
+                }
+
+                const overlay = document.createElement('div');
+                overlay.className = 'logo-spotlight';
+
+                const backdrop = document.createElement('div');
+                backdrop.className = 'logo-spotlight__backdrop';
+                overlay.appendChild(backdrop);
+
+                const shell = document.createElement('div');
+                shell.className = 'logo-spotlight__shell';
+
+                const clone = baseImage.cloneNode(true);
+                clone.removeAttribute('alt');
+                clone.setAttribute('aria-hidden', 'true');
+
+                const glyph = document.createElement('span');
+                glyph.className = 'logo-spotlight__glyph';
+                glyph.setAttribute('aria-hidden', 'true');
+
+                shell.appendChild(clone);
+                shell.appendChild(glyph);
+                overlay.appendChild(shell);
+
+                const armShell = () => {
+                    shell.classList.add('is-armed');
+                };
+
+                const releaseShell = () => {
+                    shell.classList.remove('is-armed');
+                };
+
+                const dismissOverlay = () => {
+                    releaseShell();
+                    hideSpotlight();
+                };
+
+                shell.addEventListener('pointerenter', armShell);
+                shell.addEventListener('pointerleave', dismissOverlay);
+                shell.addEventListener('focusin', armShell);
+                shell.addEventListener('focusout', releaseShell);
+                shell.addEventListener('click', closeTab);
+
+                overlay.addEventListener('pointerleave', (event) => {
+                    if (!overlay.contains(event.relatedTarget)) {
+                        dismissOverlay();
+                    }
+                });
+
+                backdrop.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    dismissOverlay();
+                });
+
+                document.body.appendChild(overlay);
+                spotlight = overlay;
+                spotlightShell = shell;
+
+                requestAnimationFrame(() => {
+                    overlay.classList.add('is-visible');
+                });
+
+                return overlay;
+            };
+
+            const showSpotlight = () => {
+                if (spotlight) {
+                    return;
+                }
+
+                logo.classList.add('is-spotlight-source');
+                ensureSpotlight();
+            };
+
+            logo.addEventListener('mouseenter', showSpotlight);
+            logo.addEventListener('focus', showSpotlight);
+            logo.addEventListener('touchstart', showSpotlight, { passive: true });
+            logo.addEventListener('blur', hideSpotlight);
+            logo.addEventListener('touchcancel', hideSpotlight, { passive: true });
+
+            logo.addEventListener('click', closeTab);
+            logo.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
+                    closeTab(event);
+                }
+                if (event.key === 'Escape') {
+                    hideSpotlight();
+                }
+            });
         })();
     </script>
 </body>
