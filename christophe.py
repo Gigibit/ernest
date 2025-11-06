@@ -46,6 +46,10 @@ ENV_PREFIX = "ERNEST"
 LEGACY_PREFIX = "CHRISTOPHE"
 
 
+MAX_EDITOR_PREVIEW_BYTES = 512 * 1024  # 512 KB per file preview
+EDITOR_MANIFEST_LIMIT = 2000
+
+
 DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
     "classify": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 512, "temp": 0.1},
     "analyze": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 512, "temp": 0.1},
@@ -705,6 +709,8 @@ def create_app(
     cache: Optional[CacheManager] = None,
     *,
     output_root: Optional[Path] = None,
+    user_store: Optional[UserStore] = None,
+    stats_store: Optional[StatsStore] = None,
 ) -> "Flask":
     """Create a Flask application exposing the migration pipeline with auth."""
 
@@ -854,13 +860,25 @@ def create_app(
     api_output_root = base_output_root / "api"
     web_output_root.mkdir(parents=True, exist_ok=True)
     api_output_root.mkdir(parents=True, exist_ok=True)
+    app.config.setdefault("ERNEST_OUTPUT_ROOT", base_output_root)
+    app.config.setdefault("ERNEST_WEB_OUTPUT_ROOT", web_output_root)
+    app.config.setdefault("ERNEST_API_OUTPUT_ROOT", api_output_root)
 
     store_value, _ = _resolve_env(
         f"{ENV_PREFIX}_USER_STORE",
         legacy=f"{LEGACY_PREFIX}_USER_STORE",
     )
     store_path = Path(store_value or ".cache/users.json")
-    user_store = UserStore(store_path)
+    user_store = user_store or UserStore(store_path)
+    app.config.setdefault("ERNEST_USER_STORE", user_store)
+
+    stats_value, _ = _resolve_env(
+        f"{ENV_PREFIX}_STATS_STORE",
+        legacy=f"{LEGACY_PREFIX}_STATS_STORE",
+    )
+    stats_path = Path(stats_value or ".cache/stats.json")
+    stats_store = stats_store or StatsStore(stats_path)
+    app.config.setdefault("ERNEST_STATS_STORE", stats_store)
 
     stats_value, _ = _resolve_env(
         f"{ENV_PREFIX}_STATS_STORE",
@@ -871,6 +889,76 @@ def create_app(
 
     def _timestamp() -> str:
         return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+    def _is_text_file(candidate: Path) -> bool:
+        try:
+            with candidate.open("rb") as handle:
+                sample = handle.read(4096)
+        except OSError:
+            return False
+        if not sample:
+            return True
+        if b"\x00" in sample:
+            return False
+        try:
+            sample.decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+        return True
+
+    def _scan_project_files(base_path: Path) -> Tuple[list[Dict[str, Any]], bool]:
+        manifest: list[Dict[str, Any]] = []
+        truncated = False
+        root = base_path.resolve()
+        try:
+            candidates = sorted(root.rglob("*"), key=lambda item: item.as_posix())
+        except OSError:
+            return manifest, truncated
+        for entry in candidates:
+            if not entry.is_file():
+                continue
+            try:
+                stat_info = entry.stat()
+            except OSError:
+                continue
+            rel_path = entry.relative_to(root).as_posix()
+            is_text = _is_text_file(entry)
+            size = int(stat_info.st_size)
+            manifest.append(
+                {
+                    "path": rel_path,
+                    "size": size,
+                    "is_text": is_text,
+                    "previewable": bool(is_text and size <= MAX_EDITOR_PREVIEW_BYTES),
+                }
+            )
+            if len(manifest) >= EDITOR_MANIFEST_LIMIT:
+                truncated = True
+                break
+        return manifest, truncated
+
+    def _resolve_project_output(
+        user_id: str, project_id: str
+    ) -> Tuple[Dict[str, Any], Path]:
+        project = user_store.get_project(user_id, project_id)
+        if not project or project.get("status") != "completed":
+            abort(404)
+        output_path = project.get("output_path")
+        if not output_path:
+            abort(404)
+        output_dir = Path(output_path)
+        if not output_dir.exists() or not output_dir.is_dir():
+            abort(404)
+        return project, output_dir
+
+    def _resolve_editor_file(base: Path, requested_path: str) -> Path:
+        candidate = (base / requested_path).resolve()
+        base_resolved = base.resolve()
+        if base_resolved not in candidate.parents:
+            abort(404)
+        if not candidate.exists() or not candidate.is_file():
+            abort(404)
+        return candidate
 
     def _extract_token(req: Any) -> Optional[str]:
         header = req.headers.get("Authorization", "") if hasattr(req, "headers") else ""
@@ -1101,6 +1189,11 @@ def create_app(
                 entry["download_url"] = url_for(
                     "api_download_project", project_id=entry["id"]
                 )
+                output_path = entry.get("output_path")
+                if output_path and Path(output_path).exists():
+                    entry["editor_url"] = url_for(
+                        "project_editor", project_id=entry["id"]
+                    )
                 completed.append(entry)
             else:
                 pending.append(entry)
@@ -1315,6 +1408,47 @@ def create_app(
         download_name = project.get("download_name") or Path(archive_path).name
         return send_file(archive_path, as_attachment=True, download_name=download_name)
 
+    @app.route("/projects/<project_id>/editor")
+    def project_editor(project_id: str):
+        if not g.get("user"):
+            return redirect(url_for("auth"))
+        project, _ = _resolve_project_output(session["user_id"], project_id)
+        manifest_url = url_for("project_editor_manifest", project_id=project_id)
+        file_url_template = url_for(
+            "project_editor_file", project_id=project_id, requested="__PATH__"
+        )
+        return render_template(
+            "editor.html",
+            project=project,
+            manifest_url=manifest_url,
+            file_url_template=file_url_template,
+        )
+
+    @app.route("/projects/<project_id>/editor/manifest", methods=["GET"])
+    def project_editor_manifest(project_id: str):
+        if not g.get("user"):
+            return redirect(url_for("auth"))
+        _, output_dir = _resolve_project_output(session["user_id"], project_id)
+        manifest, truncated = _scan_project_files(output_dir)
+        return jsonify({"files": manifest, "truncated": truncated})
+
+    @app.route(
+        "/projects/<project_id>/editor/files/<path:requested>", methods=["GET"]
+    )
+    def project_editor_file(project_id: str, requested: str):
+        if not g.get("user"):
+            return redirect(url_for("auth"))
+        _, output_dir = _resolve_project_output(session["user_id"], project_id)
+        file_path = _resolve_editor_file(output_dir, requested)
+        size = file_path.stat().st_size
+        if size > MAX_EDITOR_PREVIEW_BYTES:
+            return jsonify({"error": "File too large for live preview."}), 413
+        if not _is_text_file(file_path):
+            return jsonify({"error": "Binary files cannot be previewed."}), 415
+        with file_path.open("r", encoding="utf-8", errors="replace") as handle:
+            content = handle.read()
+        return jsonify({"path": requested, "size": int(size), "content": content})
+
     @app.route("/api/auth", methods=["POST"])
     def api_auth():
         payload = request.get_json(silent=True) or {}
@@ -1358,6 +1492,13 @@ def create_app(
                     project_id=entry["id"],
                     _external=True,
                 )
+                output_path = entry.get("output_path")
+                if output_path and Path(output_path).exists():
+                    entry["editor_url"] = url_for(
+                        "project_editor",
+                        project_id=entry["id"],
+                        _external=True,
+                    )
             projects_payload.append(entry)
         return ({"projects": projects_payload}, 200)
 

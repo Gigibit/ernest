@@ -525,18 +525,29 @@
             font-size: 0.85rem;
         }
 
+        .project-details .editor-link,
         .project-details .download {
             display: inline-block;
             margin-top: 14px;
             padding: 10px 16px;
             border-radius: 12px;
-            background: linear-gradient(120deg, var(--blue-dark), var(--blue));
             color: #fff;
             text-decoration: none;
             font-weight: 600;
         }
 
-        .project-details .download:hover { opacity: 0.9; }
+        .project-details .editor-link {
+            background: linear-gradient(120deg, #5d9cec, #428bca);
+        }
+
+        .project-details .download {
+            background: linear-gradient(120deg, var(--blue-dark), var(--blue));
+        }
+
+        .project-details .editor-link:hover,
+        .project-details .download:hover {
+            opacity: 0.9;
+        }
 
         .empty {
             color: rgba(36, 68, 98, 0.6);
@@ -730,6 +741,9 @@
                             <div class="detail-line"><strong>Last error:</strong></div>
                             <div class="detail-block" role="alert">{{ project.error }}</div>
                             {% endif %}
+                            {% if project.editor_url %}
+                            <a class="editor-link" href="{{ project.editor_url }}" target="_blank" rel="noopener">Open live editor</a>
+                            {% endif %}
                             {% if project.download_url %}
                             <a class="download" href="{{ project.download_url }}">Download archive</a>
                             {% endif %}
@@ -813,6 +827,9 @@
                             {% if project.error %}
                             <div class="detail-line"><strong>Last error:</strong></div>
                             <div class="detail-block" role="alert">{{ project.error }}</div>
+                            {% endif %}
+                            {% if project.editor_url %}
+                            <a class="editor-link" href="{{ project.editor_url }}" target="_blank" rel="noopener">Open live editor</a>
                             {% endif %}
                             {% if project.download_url %}
                             <a class="download" href="{{ project.download_url }}">Download archive</a>
@@ -1029,6 +1046,9 @@
                     details.appendChild(buildDetailHeading('Last error'));
                     details.appendChild(buildErrorBlock(project.error));
                 }
+                if (project.editor_url) {
+                    details.appendChild(buildEditorLink(project.editor_url));
+                }
                 if (project.download_url) {
                     details.appendChild(buildDownloadLink(project.download_url));
                 }
@@ -1112,6 +1132,16 @@
                 heading.className = 'detail-line';
                 heading.innerHTML = `<strong>${escapeHtml(String(label))}</strong>`;
                 return heading;
+            }
+
+            function buildEditorLink(url) {
+                const editorLink = document.createElement('a');
+                editorLink.className = 'editor-link';
+                editorLink.textContent = 'Open live editor';
+                editorLink.href = url;
+                editorLink.target = '_blank';
+                editorLink.rel = 'noopener';
+                return editorLink;
             }
 
             function buildDownloadLink(url) {
