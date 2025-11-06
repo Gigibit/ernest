@@ -55,6 +55,10 @@ class LLMService:
         tokenizer = pipe_bundle["tokenizer"]
         max_tokens = overrides.get("max_new_tokens", prof.get("max", 512))
         prompt_tokens = self._count_tokens(tokenizer, prompt)
+
+        prompt, prompt_tokens, max_tokens = self._enforce_context_window(
+            tokenizer, prompt, prompt_tokens, max_tokens
+        )
         temperature = overrides.get("temperature", prof.get("temp", 0.0))
         do_sample = overrides.get("do_sample")
         if do_sample is None:
@@ -116,6 +120,49 @@ class LLMService:
             return 0
         encoded = tokenizer(text, return_tensors="pt", add_special_tokens=False)
         return int(encoded.input_ids.shape[-1])
+
+    def _enforce_context_window(
+        self, tokenizer, prompt: str, prompt_tokens: int, max_tokens: int
+    ):
+        """Ensure prompt + generation do not exceed the model context window."""
+
+        try:
+            max_context = int(getattr(tokenizer, "model_max_length", 0))
+        except (TypeError, ValueError):  # noqa: BLE001
+            max_context = 0
+
+        # Some tokenizers advertise extremely large context lengths (e.g. GPT-2
+        # returns 1000000000000000019884624838656). Clamp to a reasonable
+        # default in that case so our math stays numerically stable.
+        if not max_context or max_context > 32768:
+            max_context = 32768
+
+        if prompt_tokens >= max_context:
+            # Trim the prompt so that there is at least one token left for
+            # generation. We keep the most recent portion of the prompt because
+            # the models primarily operate autoregressively on the tail of the
+            # context window.
+            target_prompt_tokens = max(1, max_context - max(1, max_tokens))
+            prompt = self._tail_truncate(tokenizer, prompt, target_prompt_tokens)
+            prompt_tokens = target_prompt_tokens
+
+        # Ensure the planned completion fits inside the remaining context.
+        available_for_completion = max_context - prompt_tokens
+        if available_for_completion <= 0:
+            max_tokens = 1
+        else:
+            max_tokens = max(1, min(max_tokens, available_for_completion))
+
+        return prompt, prompt_tokens, max_tokens
+
+    @staticmethod
+    def _tail_truncate(tokenizer, prompt: str, target_tokens: int) -> str:
+        encoded = tokenizer(prompt, add_special_tokens=False, return_tensors="pt")
+        ids = encoded.input_ids[0]
+        if ids.shape[-1] <= target_tokens:
+            return prompt
+        truncated_ids = ids[-target_tokens:]
+        return tokenizer.decode(truncated_ids, skip_special_tokens=False)
 
     def _register_usage(
         self, profile: str, prompt_tokens: int, completion_tokens: int
