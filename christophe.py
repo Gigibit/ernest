@@ -792,6 +792,7 @@ def create_app(
 
     brand_name = "ERNEST"
     brand_tagline = "Migration Studio"
+
     brand_context = {
         "brand_name": brand_name,
         "brand_tagline": brand_tagline,
@@ -812,6 +813,14 @@ def create_app(
         if normalized in {"0", "false", "no", "off", "disabled"}:
             return False
         return None
+
+    donate_toggle, _ = _resolve_env(
+        f"{ENV_PREFIX}_SHOW_DONATE_BUTTON",
+        legacy=f"{LEGACY_PREFIX}_SHOW_DONATE_BUTTON",
+    )
+    donate_override = _interpret_flag(donate_toggle)
+    show_donate_button = donate_override if donate_override is not None else False
+    brand_context["show_donate_button"] = show_donate_button
 
     raw_whitelist, _ = _resolve_env(
         f"{ENV_PREFIX}_PASSPHRASE_WHITELIST",
