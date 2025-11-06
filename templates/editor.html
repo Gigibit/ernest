@@ -149,6 +149,7 @@
             padding: 8px 10px;
             border-radius: 10px;
             transition: background 0.2s ease;
+            min-width: 0;
         }
 
         .file-entry button {
@@ -158,13 +159,18 @@
             font: inherit;
             text-align: left;
             flex: 1;
+            min-width: 0;
             cursor: pointer;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .file-entry .meta {
             font-size: 0.72rem;
             color: var(--ink-soft);
             white-space: nowrap;
+            flex-shrink: 0;
         }
 
         .file-entry[data-disabled="true"] button {
@@ -581,12 +587,20 @@
                 if (!Number.isFinite(size)) {
                     return '';
                 }
-                if (size >= 1024 * 1024) {
-                    return (size / (1024 * 1024)).toFixed(1) + ' MB';
+
+                const thresholds = [
+                    { limit: 1024 ** 4, suffix: ' TB' },
+                    { limit: 1024 ** 3, suffix: ' GB' },
+                    { limit: 1024 ** 2, suffix: ' MB' },
+                    { limit: 1024, suffix: ' KB' },
+                ];
+
+                for (const { limit, suffix } of thresholds) {
+                    if (size >= limit) {
+                        return (size / limit).toFixed(1) + suffix;
+                    }
                 }
-                if (size >= 1024) {
-                    return (size / 1024).toFixed(1) + ' KB';
-                }
+
                 return size + ' B';
             }
 
