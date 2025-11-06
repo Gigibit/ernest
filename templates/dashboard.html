@@ -166,11 +166,31 @@
             border: 1px solid var(--border);
             box-shadow: 0 24px 48px rgba(14, 27, 42, 0.12);
             flex-shrink: 0;
+            cursor: pointer;
+            position: relative;
+            transform-origin: center;
+            transition: transform 0.45s ease, box-shadow 0.45s ease;
+        }
+
+        .brand-icon:focus-visible {
+            outline: 3px solid var(--blue);
+            outline-offset: 6px;
+        }
+
+        .brand-icon:hover {
+            transform: translate(calc(50vw - 50%), calc(50vh - 50%)) scale(3.1);
+            box-shadow: 0 40px 80px rgba(14, 27, 42, 0.24);
+            z-index: 1000;
         }
 
         .brand-icon img {
             width: 72px;
             height: 72px;
+            transition: transform 0.45s ease;
+        }
+
+        .brand-icon:hover img {
+            transform: scale(1.08);
         }
 
         .account {
@@ -635,7 +655,7 @@
     </a>
     <div class="layout">
         <header class="portal-header">
-            <div class="brand-icon">
+            <div class="brand-icon" role="button" tabindex="0" aria-label="{{ brand_name }} logo">
                 <img src="{{ url_for('static', filename='img/ernest-mark.svg') }}" alt="{{ brand_name }} logo">
             </div>
             <div>
@@ -1282,6 +1302,26 @@
                     applyData(partitioned.pending, partitioned.completed);
                 });
             }
+        })();
+    </script>
+    <script>
+        (function () {
+            const logo = document.querySelector('.brand-icon');
+            if (!logo) {
+                return;
+            }
+
+            const closeTab = (event) => {
+                event.preventDefault();
+                window.close();
+            };
+
+            logo.addEventListener('click', closeTab);
+            logo.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
+                    closeTab(event);
+                }
+            });
         })();
     </script>
 </body>
