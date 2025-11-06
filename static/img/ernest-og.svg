@@ -1,0 +1,43 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Ernest social preview card</title>
+  <desc id="desc">A branded hero panel for the Enhanced Reasoning Network for Engineering Software Transformation.</desc>
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b1425" />
+      <stop offset="45%" stop-color="#123055" />
+      <stop offset="100%" stop-color="#1f4c80" />
+    </linearGradient>
+    <radialGradient id="glow" cx="78%" cy="24%" r="65%">
+      <stop offset="0%" stop-color="#3aa6e9" stop-opacity="0.55" />
+      <stop offset="100%" stop-color="#3aa6e9" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3aa6e9" />
+      <stop offset="100%" stop-color="#1c6fb2" />
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bgGradient)" />
+  <rect width="1200" height="630" fill="url(#glow)" />
+  <g transform="translate(140 150)">
+    <rect x="0" y="0" width="340" height="340" rx="48" fill="#0f1e35" opacity="0.9" />
+    <g transform="translate(40 40) scale(1.05)">
+      <circle cx="120" cy="120" r="120" fill="#0b1425" opacity="0.92" />
+      <circle cx="120" cy="120" r="96" fill="#ffffff" opacity="0.98" />
+      <circle cx="120" cy="120" r="68" fill="url(#accent)" />
+      <circle cx="120" cy="120" r="34" fill="#06101f" />
+      <circle cx="50" cy="120" r="20" fill="#ff2d92" />
+      <g fill="#06101f">
+        <rect x="14" y="78" width="16" height="28" rx="6" />
+        <rect x="14" y="112" width="16" height="28" rx="6" />
+        <rect x="14" y="146" width="16" height="28" rx="6" />
+      </g>
+    </g>
+  </g>
+  <g transform="translate(520 190)" fill="#ecf3fb">
+    <text font-family="'Inter', 'Segoe UI', sans-serif" font-size="60" font-weight="600" letter-spacing="0.08em">ERNEST</text>
+    <text y="80" font-family="'Inter', 'Segoe UI', sans-serif" font-size="28" letter-spacing="0.32em" fill="#8fbce0">ENHANCED REASONING NETWORK</text>
+    <rect y="110" width="220" height="6" fill="url(#accent)" rx="3" />
+    <text y="186" font-family="'Inter', 'Segoe UI', sans-serif" font-size="30" fill="#cfe3f7">for Engineering Software Transformation</text>
+    <text y="242" font-family="'Inter', 'Segoe UI', sans-serif" font-size="22" fill="#9ec4e6" letter-spacing="0.08em">AI-ASSISTED BLUEPRINTS · MODERNISATION ROADMAPS · DELIVERY AUTOMATION</text>
+  </g>
+</svg>
