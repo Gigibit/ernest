@@ -540,18 +540,10 @@
 
         .project-details .editor-link {
             background: linear-gradient(120deg, #5d9cec, #428bca);
-            margin-right: 14px;
         }
 
         .project-details .download {
             background: linear-gradient(120deg, var(--blue-dark), var(--blue));
-        }
-
-        .project-details .editor-link svg,
-        .project-details .download svg {
-            width: 16px;
-            height: 16px;
-            fill: currentColor;
         }
 
         .project-details .editor-link:hover,
@@ -752,12 +744,7 @@
                             <div class="detail-block" role="alert">{{ project.error }}</div>
                             {% endif %}
                             {% if project.editor_url %}
-                            <a class="editor-link" href="{{ project.editor_url }}" target="_blank" rel="noopener">
-                                <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
-                                    <path d="M21 11.5V21a1 1 0 0 1-1 1h-8a1 1 0 1 1 0-2h7v-7a1 1 0 1 1 2 0Zm1.707-6.207-2-2a1 1 0 0 0-1.414 0l-9 9a1 1 0 0 0-.263.464l-1 4a1 1 0 0 0 1.213 1.213l4-1a1 1 0 0 0 .464-.263l9-9a1 1 0 0 0 0-1.414ZM14.914 8 17 10.086 19.586 7.5 17.5 5.414 14.914 8ZM9.914 13 12 15.086 8.936 15.936 9.914 13Z"/>
-                                </svg>
-                                <span>Live editor</span>
-                            </a>
+                            <a class="editor-link" href="{{ project.editor_url }}" target="_blank" rel="noopener">Open live editor</a>
                             {% endif %}
                             {% if project.download_url %}
                             <a class="download" href="{{ project.download_url }}">
@@ -849,12 +836,7 @@
                             <div class="detail-block" role="alert">{{ project.error }}</div>
                             {% endif %}
                             {% if project.editor_url %}
-                            <a class="editor-link" href="{{ project.editor_url }}" target="_blank" rel="noopener">
-                                <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
-                                    <path d="M21 11.5V21a1 1 0 0 1-1 1h-8a1 1 0 1 1 0-2h7v-7a1 1 0 1 1 2 0Zm1.707-6.207-2-2a1 1 0 0 0-1.414 0l-9 9a1 1 0 0 0-.263.464l-1 4a1 1 0 0 0 1.213 1.213l4-1a1 1 0 0 0 .464-.263l9-9a1 1 0 0 0 0-1.414ZM14.914 8 17 10.086 19.586 7.5 17.5 5.414 14.914 8ZM9.914 13 12 15.086 8.936 15.936 9.914 13Z"/>
-                                </svg>
-                                <span>Live editor</span>
-                            </a>
+                            <a class="editor-link" href="{{ project.editor_url }}" target="_blank" rel="noopener">Open live editor</a>
                             {% endif %}
                             {% if project.download_url %}
                             <a class="download" href="{{ project.download_url }}">
