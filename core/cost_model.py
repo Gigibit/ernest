@@ -10,7 +10,7 @@ from typing import Dict, Mapping, MutableMapping
 # size; we use an easy-to-follow round number to keep the "receipt" readable.
 H100_TOKENS_PER_SECOND = 1800
 
-# Hypothetical on-demand hourly price (USD) for an H100 instance.  The actual
+# Hypothetical on-demand hourly price (EUR) for an H100 instance.  The actual
 # cost fluctuates per provider; this value can be adjusted by callers via the
 # ``hourly_rate`` argument.
 H100_HOURLY_RATE = 4.10
@@ -73,7 +73,7 @@ def estimate_h100_receipt(
 
     receipt: MutableMapping[str, float | int | Dict[str, Dict[str, int]] | str] = {
         "hardware": "NVIDIA H100",
-        "currency": "USD",
+        "currency": "EUR",
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "total_tokens": total_tokens,
