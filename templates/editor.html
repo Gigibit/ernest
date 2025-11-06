@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>{{ brand_name }} Live Editor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Enhanced Reasoning Network for Engineering Software Transformation">
+    <meta property="og:title" content="{{ brand_name }} Live Editor">
+    <meta property="og:description" content="Enhanced Reasoning Network for Engineering Software Transformation">
+    <meta property="og:image" content="{{ url_for('static', filename='img/ernest-og.svg') }}">
+    <meta property="og:image:alt" content="{{ brand_name }} mark">
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:title" content="{{ brand_name }} Live Editor">
+    <meta property="twitter:description" content="Enhanced Reasoning Network for Engineering Software Transformation">
+    <meta property="twitter:image" content="{{ url_for('static', filename='img/ernest-og.svg') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/ernest-mark.svg') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            color-scheme: light dark;
+            font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            --bg: #f5f8fb;
+            --panel: rgba(255, 255, 255, 0.9);
+            --panel-alt: rgba(250, 252, 255, 0.82);
+            --ink: #1a2a3a;
+            --ink-soft: rgba(26, 42, 58, 0.7);
+            --accent: #428bca;
+            --accent-strong: #346aa3;
+            --border: rgba(26, 42, 58, 0.08);
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: radial-gradient(circle at top left, rgba(90, 180, 255, 0.12), transparent 45%),
+                        radial-gradient(circle at bottom right, rgba(52, 168, 83, 0.1), transparent 40%),
+                        var(--bg);
+            display: flex;
+            flex-direction: column;
+            color: var(--ink);
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 24px 32px;
+        }
+
+        header img {
+            width: 48px;
+            height: 48px;
+        }
+
+        header h1 {
+            font-size: 1.5rem;
+            margin: 0;
+        }
+
+        header .subtitle {
+            margin: 4px 0 0;
+            color: var(--ink-soft);
+            font-size: 0.95rem;
+        }
+
+        main {
+            flex: 1;
+            display: grid;
+            grid-template-columns: minmax(260px, 340px) 1fr;
+            gap: 24px;
+            padding: 0 32px 32px;
+        }
+
+        .file-browser,
+        .editor-panel {
+            background: var(--panel);
+            backdrop-filter: blur(18px);
+            border-radius: 20px;
+            box-shadow: 0 18px 38px rgba(22, 30, 46, 0.12);
+            border: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .file-browser header,
+        .editor-panel header {
+            padding: 20px 22px 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .file-browser h2,
+        .editor-panel h2 {
+            font-size: 1rem;
+            margin: 0;
+            font-weight: 600;
+        }
+
+        #file-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 22px 22px;
+            font-family: 'Fira Code', 'Source Code Pro', monospace;
+            font-size: 0.82rem;
+        }
+
+        .file-entry {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 8px 10px;
+            border-radius: 10px;
+            transition: background 0.2s ease;
+        }
+
+        .file-entry button {
+            background: none;
+            border: none;
+            color: var(--ink);
+            font: inherit;
+            text-align: left;
+            flex: 1;
+            cursor: pointer;
+        }
+
+        .file-entry .meta {
+            font-size: 0.72rem;
+            color: var(--ink-soft);
+            white-space: nowrap;
+        }
+
+        .file-entry[data-disabled="true"] button {
+            cursor: not-allowed;
+            color: rgba(26, 42, 58, 0.4);
+        }
+
+        .file-entry[data-disabled="true"] .meta {
+            color: rgba(26, 42, 58, 0.35);
+        }
+
+        .file-entry:hover {
+            background: var(--panel-alt);
+        }
+
+        .file-entry.selected {
+            background: rgba(66, 139, 202, 0.15);
+        }
+
+        .editor-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 16px 22px;
+        }
+
+        .editor-toolbar h2 {
+            margin: 0;
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--ink);
+        }
+
+        .editor-toolbar button {
+            padding: 8px 14px;
+            border-radius: 10px;
+            border: none;
+            background: linear-gradient(120deg, var(--accent), var(--accent-strong));
+            color: #fff;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .editor-toolbar button:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+
+        #editor {
+            flex: 1;
+            margin: 0 22px 12px;
+            padding: 18px;
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            background: var(--panel-alt);
+            font-family: 'Fira Code', 'Source Code Pro', monospace;
+            font-size: 0.88rem;
+            line-height: 1.55;
+            resize: none;
+            min-height: 320px;
+            color: var(--ink);
+            box-sizing: border-box;
+        }
+
+        #editor[readonly] {
+            cursor: text;
+        }
+
+        .prompt-form {
+            margin: 0 22px 22px;
+            padding: 16px;
+            border-radius: 14px;
+            border: 1px solid var(--border);
+            background: var(--panel-alt);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .prompt-form label {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--ink);
+        }
+
+        .prompt-form textarea {
+            min-height: 90px;
+            max-height: 220px;
+            resize: vertical;
+            padding: 12px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            font-size: 0.95rem;
+            line-height: 1.5;
+            color: var(--ink);
+            background: rgba(255, 255, 255, 0.85);
+        }
+
+        .prompt-form textarea:focus {
+            outline: 2px solid rgba(66, 139, 202, 0.3);
+        }
+
+        .prompt-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .prompt-actions button {
+            padding: 10px 18px;
+            border-radius: 999px;
+            border: none;
+            background: linear-gradient(120deg, var(--accent), var(--accent-strong));
+            color: #fff;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .prompt-actions button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .prompt-feedback {
+            font-size: 0.8rem;
+            color: var(--ink-soft);
+        }
+
+        .prompt-feedback[data-variant="error"] {
+            color: #d64545;
+        }
+
+        .prompt-feedback[data-variant="success"] {
+            color: #2c7a48;
+        }
+
+        #status-line {
+            padding: 0 22px 22px;
+            font-size: 0.82rem;
+            color: var(--ink-soft);
+        }
+
+        #truncated-warning {
+            margin: 0 22px 18px;
+            padding: 12px 14px;
+            border-radius: 12px;
+            background: rgba(66, 139, 202, 0.12);
+            color: var(--ink);
+            font-size: 0.78rem;
+        }
+
+        footer {
+            text-align: center;
+            padding: 18px 32px 24px;
+            color: rgba(26, 42, 58, 0.6);
+            font-size: 0.85rem;
+        }
+
+        @media (max-width: 1080px) {
+            main {
+                grid-template-columns: 1fr;
+            }
+
+            .editor-panel {
+                min-height: 420px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <img src="{{ url_for('static', filename='img/ernest-mark.svg') }}" alt="{{ brand_name }} logo">
+        <div>
+            <h1>{{ brand_name }} live editor</h1>
+            <p class="subtitle">{{ project.name or project.project_name or project.id or 'Project' }}</p>
+        </div>
+    </header>
+    <main>
+        <section class="file-browser">
+            <header>
+                <h2>Project files</h2>
+            </header>
+            <div id="truncated-warning" hidden>
+                Listing truncated. Use download to retrieve the complete archive.
+            </div>
+            <div id="file-list" role="tree" aria-label="Project files"></div>
+        </section>
+        <section class="editor-panel">
+            <div class="editor-toolbar">
+                <h2 id="current-file">Select a file to preview</h2>
+                <button id="copy-button" type="button" disabled>Copy to clipboard</button>
+            </div>
+            <textarea id="editor" spellcheck="false" placeholder="File contents will appear here" readonly></textarea>
+            <div id="status-line">No file selected.</div>
+            <form id="prompt-form" class="prompt-form">
+                <label for="prompt-input">Ask Ernest to modify the project</label>
+                <textarea id="prompt-input" name="prompt" placeholder="Describe the change you need" required></textarea>
+                <div class="prompt-actions">
+                    <button type="submit" id="prompt-submit">Apply changes</button>
+                    <span id="prompt-feedback" class="prompt-feedback" aria-live="polite"></span>
+                </div>
+            </form>
+        </section>
+    </main>
+    <footer>
+        Powered by {{ brand_name }} — the migration studio that keeps a clear eye on every blueprint.
+    </footer>
+    <script>
+        (function () {
+            const manifestUrl = {{ manifest_url|tojson }};
+            const fileUrlTemplate = {{ file_url_template|tojson }};
+            const applyUrl = {{ apply_url|tojson }};
+            const fileList = document.getElementById('file-list');
+            const truncatedWarning = document.getElementById('truncated-warning');
+            const editor = document.getElementById('editor');
+            const statusLine = document.getElementById('status-line');
+            const currentFile = document.getElementById('current-file');
+            const copyButton = document.getElementById('copy-button');
+            const promptForm = document.getElementById('prompt-form');
+            const promptInput = document.getElementById('prompt-input');
+            const promptSubmit = document.getElementById('prompt-submit');
+            const promptFeedback = document.getElementById('prompt-feedback');
+
+            let currentPath = null;
+            let manifestEntries = [];
+            async function loadManifest() {
+                try {
+                    const response = await fetch(manifestUrl, { credentials: 'include' });
+                    if (!response.ok) {
+                        throw new Error('Unable to load project manifest');
+                    }
+                    const payload = await response.json();
+                    renderManifest(payload);
+                    return payload;
+                } catch (error) {
+                    fileList.textContent = error.message || 'Unable to load files.';
+                    return null;
+                }
+            }
+
+            function renderManifest(payload) {
+                const files = (payload && Array.isArray(payload.files)) ? payload.files : [];
+                manifestEntries = files;
+                fileList.innerHTML = '';
+
+                if (!files.length) {
+                    const empty = document.createElement('p');
+                    empty.textContent = 'No generated files are available yet.';
+                    fileList.appendChild(empty);
+                } else {
+                    files.forEach((file) => {
+                        const entry = document.createElement('div');
+                        entry.className = 'file-entry';
+                        entry.setAttribute('role', 'treeitem');
+                        entry.dataset.path = file.path;
+                        if (!file.previewable) {
+                            entry.dataset.disabled = 'true';
+                        }
+
+                        const button = document.createElement('button');
+                        button.type = 'button';
+                        button.textContent = file.path;
+                        button.addEventListener('click', () => handleFileClick(file));
+                        if (!file.previewable) {
+                            button.disabled = true;
+                        }
+
+                        const meta = document.createElement('span');
+                        meta.className = 'meta';
+                        meta.textContent = formatSize(file.size) + (file.previewable ? '' : ' • preview unavailable');
+
+                        entry.appendChild(button);
+                        entry.appendChild(meta);
+                        fileList.appendChild(entry);
+                        if (currentPath && file.path === currentPath) {
+                            entry.classList.add('selected');
+                        }
+                    });
+                }
+
+                truncatedWarning.hidden = !payload.truncated;
+            }
+
+            function formatSize(size) {
+                if (!Number.isFinite(size)) {
+                    return '';
+                }
+                if (size >= 1024 * 1024) {
+                    return (size / (1024 * 1024)).toFixed(1) + ' MB';
+                }
+                if (size >= 1024) {
+                    return (size / 1024).toFixed(1) + ' KB';
+                }
+                return size + ' B';
+            }
+
+            function clearSelection() {
+                fileList.querySelectorAll('.file-entry').forEach((entry) => {
+                    entry.classList.remove('selected');
+                });
+            }
+
+            async function handleFileClick(metadata) {
+                clearSelection();
+                const entry = fileList.querySelector(`[data-path="${CSS.escape(metadata.path)}"]`);
+                if (entry) {
+                    entry.classList.add('selected');
+                }
+
+                if (!metadata.previewable) {
+                    currentFile.textContent = metadata.path;
+                    editor.value = '';
+                    copyButton.disabled = true;
+                    statusLine.textContent = 'Preview unavailable for this file. Use download to inspect it locally.';
+                    currentPath = null;
+                    return;
+                }
+
+                statusLine.textContent = 'Loading…';
+                copyButton.disabled = true;
+
+                try {
+                    const url = fileUrlTemplate.replace('__PATH__', encodeURIComponent(metadata.path));
+                    const response = await fetch(url, { credentials: 'include' });
+                    const payload = await response.json();
+                    if (!response.ok) {
+                        throw new Error(payload && payload.error ? payload.error : response.statusText);
+                    }
+                    editor.value = payload.content || '';
+                    copyButton.disabled = false;
+                    statusLine.textContent = `Loaded ${metadata.path} (${formatSize(metadata.size)})`;
+                    currentFile.textContent = metadata.path;
+                    currentPath = metadata.path;
+                } catch (error) {
+                    editor.value = '';
+                    copyButton.disabled = true;
+                    statusLine.textContent = error.message || 'Unable to load file.';
+                    currentFile.textContent = metadata.path;
+                    currentPath = null;
+                }
+            }
+
+            copyButton.addEventListener('click', async () => {
+                if (!currentPath) {
+                    return;
+                }
+                try {
+                    await navigator.clipboard.writeText(editor.value || '');
+                    statusLine.textContent = `Copied ${currentPath} to clipboard.`;
+                } catch (error) {
+                    statusLine.textContent = 'Unable to copy to clipboard in this context.';
+                }
+            });
+
+            async function reopenCurrentFileIfAvailable() {
+                if (!currentPath) {
+                    return;
+                }
+                const metadata = manifestEntries.find((item) => item.path === currentPath);
+                if (metadata) {
+                    await handleFileClick(metadata);
+                } else {
+                    currentFile.textContent = 'Select a file to preview';
+                    editor.value = '';
+                    copyButton.disabled = true;
+                    statusLine.textContent = 'Current file is no longer available.';
+                    currentPath = null;
+                }
+            }
+
+            promptForm.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                const value = promptInput.value.trim();
+                if (!value) {
+                    promptFeedback.textContent = 'Provide instructions for the change you need.';
+                    promptFeedback.dataset.variant = 'error';
+                    promptInput.focus();
+                    return;
+                }
+
+                promptSubmit.disabled = true;
+                promptInput.readOnly = true;
+                promptFeedback.textContent = 'Applying changes…';
+                promptFeedback.dataset.variant = 'pending';
+
+                try {
+                    const response = await fetch(applyUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ prompt: value, focus: currentPath }),
+                    });
+                    const payload = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        throw new Error(payload && payload.error ? payload.error : response.statusText);
+                    }
+
+                    promptFeedback.textContent = payload.summary || 'Changes applied.';
+                    promptFeedback.dataset.variant = 'success';
+                    promptInput.value = '';
+
+                    const refreshed = Array.isArray(payload.refreshed_paths) ? payload.refreshed_paths : [];
+                    await loadManifest();
+                    if (currentPath && refreshed.includes(currentPath)) {
+                        await reopenCurrentFileIfAvailable();
+                    }
+                } catch (error) {
+                    promptFeedback.textContent = error.message || 'Unable to apply changes.';
+                    promptFeedback.dataset.variant = 'error';
+                } finally {
+                    promptSubmit.disabled = false;
+                    promptInput.readOnly = false;
+                    promptInput.focus();
+                }
+            });
+
+            loadManifest();
+        })();
+    </script>
+</body>
+</html>
