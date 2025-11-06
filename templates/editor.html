@@ -51,6 +51,10 @@
             z-index: 2000;
         }
 
+        body.no-donate #donate-button {
+            display: none;
+        }
+
         #donate-button .paypal-button {
             display: inline-flex;
             align-items: center;
@@ -448,7 +452,7 @@
         }
     </style>
 </head>
-<body>
+<body{% if not show_donate_button %} class="no-donate"{% endif %}>
     <a id="donate-button" href="https://www.paypal.me/gigibit" target="_blank" rel="noopener" style="text-decoration:none;">
         <div class="button paypal-button" aria-label="Dona via PayPal" onmouseover="this.style.transform='scale(1.05)';" onmouseout="this.style.transform='scale(1)';">Dona</div>
     </a>
