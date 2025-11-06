@@ -43,6 +43,34 @@
             overflow: hidden;
         }
 
+        #donate-button {
+            position: fixed;
+            top: 20px;
+            right: 24px;
+            text-decoration: none;
+            z-index: 2000;
+        }
+
+        #donate-button .paypal-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 6px 18px;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #ffc439, #f7b500);
+            color: var(--ink);
+            font-weight: 600;
+            font-size: 0.9rem;
+            box-shadow: 0 12px 24px rgba(14, 27, 42, 0.12);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        #donate-button .paypal-button:hover,
+        #donate-button .paypal-button:focus-visible {
+            transform: scale(1.05);
+            box-shadow: 0 16px 32px rgba(14, 27, 42, 0.16);
+        }
+
         header {
             display: flex;
             align-items: center;
@@ -421,6 +449,9 @@
     </style>
 </head>
 <body>
+    <a id="donate-button" href="https://www.paypal.me/gigibit" target="_blank" rel="noopener">
+        <div class="paypal-button" aria-label="Dona via PayPal">Dona</div>
+    </a>
     <header>
         <img src="{{ url_for('static', filename='img/ernest-mark.svg') }}" alt="{{ brand_name }} logo">
         <div>
