@@ -501,7 +501,7 @@
         details.detail-collapsible summary::-webkit-details-marker { display: none; }
 
         details.detail-collapsible summary::before {
-            content: '\u25B8';
+            content: '▸';
             transition: transform 0.2s ease;
             font-size: 0.75rem;
             color: rgba(36, 68, 98, 0.45);
@@ -527,7 +527,9 @@
 
         .project-details .editor-link,
         .project-details .download {
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
             margin-top: 14px;
             padding: 10px 16px;
             border-radius: 12px;
@@ -745,7 +747,12 @@
                             <a class="editor-link" href="{{ project.editor_url }}" target="_blank" rel="noopener">Open live editor</a>
                             {% endif %}
                             {% if project.download_url %}
-                            <a class="download" href="{{ project.download_url }}">Download archive</a>
+                            <a class="download" href="{{ project.download_url }}">
+                                <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+                                    <path d="M12 3a1 1 0 0 0-1 1v7.586L8.707 9.293a1 1 0 0 0-1.414 1.414l4 4a1 1 0 0 0 1.414 0l4-4a1 1 0 1 0-1.414-1.414L13 11.586V4a1 1 0 0 0-1-1Zm-7 14a1 1 0 1 0 0 2h14a1 1 0 1 0 0-2H5Z"/>
+                                </svg>
+                                <span>Download archive</span>
+                            </a>
                             {% endif %}
                         </div>
                     </div>
@@ -832,7 +839,12 @@
                             <a class="editor-link" href="{{ project.editor_url }}" target="_blank" rel="noopener">Open live editor</a>
                             {% endif %}
                             {% if project.download_url %}
-                            <a class="download" href="{{ project.download_url }}">Download archive</a>
+                            <a class="download" href="{{ project.download_url }}">
+                                <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+                                    <path d="M12 3a1 1 0 0 0-1 1v7.586L8.707 9.293a1 1 0 0 0-1.414 1.414l4 4a1 1 0 0 0 1.414 0l4-4a1 1 0 1 0-1.414-1.414L13 11.586V4a1 1 0 0 0-1-1Zm-7 14a1 1 0 1 0 0 2h14a1 1 0 1 0 0-2H5Z"/>
+                                </svg>
+                                <span>Download archive</span>
+                            </a>
                             {% endif %}
                         </div>
                     </div>
@@ -1134,20 +1146,35 @@
                 return heading;
             }
 
+            function appendIconLabel(link, iconPath, label) {
+                const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                svg.setAttribute('aria-hidden', 'true');
+                svg.setAttribute('focusable', 'false');
+                svg.setAttribute('viewBox', '0 0 24 24');
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path.setAttribute('d', iconPath);
+                path.setAttribute('fill', 'currentColor');
+                svg.appendChild(path);
+                link.appendChild(svg);
+                const textSpan = document.createElement('span');
+                textSpan.textContent = label;
+                link.appendChild(textSpan);
+            }
+
             function buildEditorLink(url) {
                 const editorLink = document.createElement('a');
                 editorLink.className = 'editor-link';
-                editorLink.textContent = 'Open live editor';
                 editorLink.href = url;
                 editorLink.target = '_blank';
                 editorLink.rel = 'noopener';
+                appendIconLabel(editorLink, 'M21 11.5V21a1 1 0 0 1-1 1h-8a1 1 0 1 1 0-2h7v-7a1 1 0 1 1 2 0Zm1.707-6.207-2-2a1 1 0 0 0-1.414 0l-9 9a1 1 0 0 0-.263.464l-1 4a1 1 0 0 0 1.213 1.213l4-1a1 1 0 0 0 .464-.263l9-9a1 1 0 0 0 0-1.414ZM14.914 8 17 10.086 19.586 7.5 17.5 5.414 14.914 8ZM9.914 13 12 15.086 8.936 15.936 9.914 13Z', 'Live editor');
                 return editorLink;
             }
 
             function buildDownloadLink(url) {
                 const downloadLink = document.createElement('a');
                 downloadLink.className = 'download';
-                downloadLink.textContent = 'Download archive';
+                appendIconLabel(downloadLink, 'M12 3a1 1 0 0 0-1 1v7.586L8.707 9.293a1 1 0 0 0-1.414 1.414l4 4a1 1 0 0 0 1.414 0l4-4a1 1 0 1 0-1.414-1.414L13 11.586V4a1 1 0 0 0-1-1Zm-7 14a1 1 0 1 0 0 2h14a1 1 0 1 0 0-2H5Z', 'Download archive');
                 let downloadHref = url;
                 if (token && typeof downloadHref === 'string' && downloadHref.includes('/api/')) {
                     try {
