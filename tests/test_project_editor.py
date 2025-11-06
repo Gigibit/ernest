@@ -1,3 +1,4 @@
+import json
 import shutil
 from pathlib import Path
 import sys
@@ -12,7 +13,7 @@ from core.user_store import UserStore
 
 
 @pytest.fixture()
-def app(tmp_path, monkeypatch):
+def app(tmp_path):
     user_store_path = tmp_path / "users.json"
     stats_store_path = tmp_path / "stats.json"
     output_root = tmp_path / "output"
@@ -113,3 +114,82 @@ def test_api_projects_includes_editor_url(app, sample_project):
     assert payload is not None
     project = payload["projects"][0]
     assert "editor_url" in project
+
+
+def test_project_editor_apply_prompt_updates_file(app, sample_project, monkeypatch):
+    client = app.test_client()
+    login(client, sample_project["user_id"])
+
+    project_id = sample_project["project"]["id"]
+    llm_service = app.config["ERNEST_LLM_SERVICE"]
+    captured: dict[str, str] = {}
+
+    def fake_invoke(name, prompt, **kwargs):
+        captured["name"] = name
+        captured["prompt"] = prompt
+        return json.dumps(
+            {
+                "summary": "Updated greeting",
+                "changes": [
+                    {
+                        "path": "hello.txt",
+                        "operation": "replace",
+                        "content": "ciao mondo\n",
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(llm_service, "invoke", fake_invoke)
+
+    response = client.post(
+        f"/projects/{project_id}/editor/apply",
+        json={"prompt": "Change the greeting", "focus": "hello.txt"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload is not None
+    assert payload["applied"] is True
+    assert any(update["path"] == "hello.txt" for update in payload["updates"])
+    assert captured.get("name") == "editor"
+
+    output_file = Path(sample_project["project"]["output_path"]) / "hello.txt"
+    assert "ciao mondo" in output_file.read_text(encoding="utf-8")
+
+
+def test_project_editor_apply_rejects_invalid_paths(app, sample_project, monkeypatch):
+    client = app.test_client()
+    login(client, sample_project["user_id"])
+
+    project_id = sample_project["project"]["id"]
+    llm_service = app.config["ERNEST_LLM_SERVICE"]
+
+    def fake_invoke(name, prompt, **kwargs):
+        return json.dumps(
+            {
+                "summary": "Attempted escape",
+                "changes": [
+                    {
+                        "path": "../evil.txt",
+                        "operation": "replace",
+                        "content": "oops",
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(llm_service, "invoke", fake_invoke)
+
+    response = client.post(
+        f"/projects/{project_id}/editor/apply",
+        json={"prompt": "do something"},
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload is not None
+    assert "error" in payload
+
+    output_file = Path(sample_project["project"]["output_path"]) / "hello.txt"
+    assert "hello world" in output_file.read_text(encoding="utf-8")

@@ -35,6 +35,7 @@ from migration.dependency_resolver import DependencyResolver
 from migration.recovery_manager import RecoveryManager
 from migration.resource_migrator import ResourceMigrator
 from migration.source_migrator import SourceMigrator
+from editor import LiveEditorAgent
 from planning.architecture_agent import ArchitecturePlanner
 from planning.containerization_agent import ContainerizationAgent
 from planning.scaffolding_blueprint_agent import ScaffoldingBlueprintAgent
@@ -61,6 +62,7 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
     "dependency": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1536, "temp": 0.0},
     "compatibility": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1536, "temp": 0.0},
     "blueprint": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 1536, "temp": 0.0},
+    "editor": {"id": "mistralai/Mistral-7B-Instruct-v0.3", "max": 2048, "temp": 0.0},
 }
 
 
@@ -840,6 +842,9 @@ def create_app(
 
     llm_service = llm or LLMService(_resolved_profiles())
     cache_manager = cache or CacheManager(Path(".cache/migration_cache.db"))
+    app.config["ERNEST_LLM_SERVICE"] = llm_service
+    app.config["ERNEST_CACHE_MANAGER"] = cache_manager
+    app.config["ERNEST_LIVE_EDITOR_AGENT"] = LiveEditorAgent(llm_service)
     worker_value, worker_env = _resolve_env(
         f"{ENV_PREFIX}_WORKERS",
         legacy=f"{LEGACY_PREFIX}_WORKERS",
@@ -879,13 +884,6 @@ def create_app(
     stats_path = Path(stats_value or ".cache/stats.json")
     stats_store = stats_store or StatsStore(stats_path)
     app.config.setdefault("ERNEST_STATS_STORE", stats_store)
-
-    stats_value, _ = _resolve_env(
-        f"{ENV_PREFIX}_STATS_STORE",
-        legacy=f"{LEGACY_PREFIX}_STATS_STORE",
-    )
-    stats_path = Path(stats_value or ".cache/stats.json")
-    stats_store = StatsStore(stats_path)
 
     def _timestamp() -> str:
         return datetime.utcnow().isoformat(timespec="seconds") + "Z"
@@ -1417,11 +1415,13 @@ def create_app(
         file_url_template = url_for(
             "project_editor_file", project_id=project_id, requested="__PATH__"
         )
+        apply_url = url_for("project_editor_apply", project_id=project_id)
         return render_template(
             "editor.html",
             project=project,
             manifest_url=manifest_url,
             file_url_template=file_url_template,
+            apply_url=apply_url,
         )
 
     @app.route("/projects/<project_id>/editor/manifest", methods=["GET"])
@@ -1448,6 +1448,33 @@ def create_app(
         with file_path.open("r", encoding="utf-8", errors="replace") as handle:
             content = handle.read()
         return jsonify({"path": requested, "size": int(size), "content": content})
+
+    @app.route("/projects/<project_id>/editor/apply", methods=["POST"])
+    def project_editor_apply(project_id: str):
+        if not g.get("user"):
+            return redirect(url_for("auth"))
+        project, output_dir = _resolve_project_output(session["user_id"], project_id)
+        payload = request.get_json(silent=True) or {}
+        prompt = payload.get("prompt") if isinstance(payload, dict) else None
+        focus = payload.get("focus") if isinstance(payload, dict) else None
+        agent: LiveEditorAgent = app.config["ERNEST_LIVE_EDITOR_AGENT"]
+        try:
+            result = agent.apply_prompt(
+                output_dir,
+                prompt or "",
+                focus_path=focus if isinstance(focus, str) else None,
+                project_name=(
+                    project.get("name")
+                    or project.get("project_name")
+                    or project.get("id")
+                ),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception:
+            app.logger.exception("Failed to apply live editor prompt")
+            return jsonify({"error": "Unable to apply modifications."}), 500
+        return jsonify(result)
 
     @app.route("/api/auth", methods=["POST"])
     def api_auth():
