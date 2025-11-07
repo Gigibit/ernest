@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <title>{{ brand_name }} {{ brand_tagline }}</title>
     <meta name="description" content="Enhanced Reasoning Network for Engineering Software Transformation">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta property="og:type" content="website">
     <meta property="og:title" content="{{ brand_name }} {{ brand_tagline }}">
     <meta property="og:description" content="Enhanced Reasoning Network for Engineering Software Transformation">
@@ -359,18 +360,34 @@
         }
 
         @media (max-width: 1024px) {
-            main { grid-template-columns: 1fr; }
+            body { padding: 32px 20px; }
+            main { grid-template-columns: 1fr; gap: 32px; }
             .brand-panel { order: 2; padding: 36px; }
             .form-card { order: 1; }
         }
 
+        @media (max-width: 768px) {
+            body { padding: 28px 18px; }
+            .brand-panel { padding: 32px 28px; }
+            .form-card { padding: 36px 28px; }
+            .brand-header { flex-direction: column; align-items: flex-start; gap: 16px; }
+            .form-header { flex-direction: column; align-items: flex-start; gap: 12px; }
+            .brand-footer { flex-direction: column; align-items: flex-start; }
+        }
+
         @media (max-width: 600px) {
             body { padding: 24px 16px; }
-            .brand-panel { padding: 28px; border-radius: 22px; }
+            .brand-panel { padding: 28px 24px; border-radius: 22px; }
             .form-card { padding: 32px 26px; border-radius: 22px; }
-            .brand-header { flex-direction: column; align-items: flex-start; }
             .brand-logo { width: 80px; height: 80px; }
-            .form-header { flex-direction: column; align-items: flex-start; }
+        }
+
+        @media (max-width: 480px) {
+            body { padding: 22px 14px; }
+            .brand-panel { padding: 24px 20px; }
+            .form-card { padding: 28px 22px; }
+            .brand-summary { padding: 16px 18px; }
+            button { padding: 14px 16px; }
         }
     </style>
 </head>
