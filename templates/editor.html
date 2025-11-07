@@ -1003,45 +1003,8 @@
                     return;
                 }
 
-            const removeSpotlight = () => {
-                if (!spotlight) {
-                    return;
-                }
-
-                const overlay = spotlight;
-                spotlight = null;
-
-                const finalize = () => {
-                    overlay.remove();
-                };
-
-                overlay.classList.remove('is-visible');
-
-                if (prefersReducedMotion) {
-                    finalize();
-                } else {
-                    overlay.addEventListener('transitionend', finalize, { once: true });
-                }
-            };
-
-            const showSpotlight = () => {
                 logo.classList.add('is-spotlight-source');
                 ensureSpotlight();
-            };
-
-            logo.addEventListener('mouseenter', showSpotlight);
-            logo.addEventListener('focus', showSpotlight);
-            logo.addEventListener('touchstart', showSpotlight, { passive: true });
-            logo.addEventListener('blur', hideSpotlight);
-            const hideSpotlight = () => {
-                logo.classList.remove('is-spotlight-source');
-                removeSpotlight();
-            };
-
-            const closeTab = (event) => {
-                event.preventDefault();
-                hideSpotlight();
-                window.close();
             };
 
             logo.addEventListener('mouseenter', showSpotlight);
