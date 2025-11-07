@@ -31,6 +31,10 @@
             --border: rgba(26, 42, 58, 0.08);
         }
 
+        html {
+            overflow-x: hidden;
+        }
+
         body {
             margin: 0;
             height: 100vh;
@@ -94,6 +98,7 @@
             box-shadow: 0 18px 36px rgba(20, 35, 54, 0.18);
             cursor: pointer;
             transition: transform 0.28s ease, box-shadow 0.28s ease;
+            max-width: 100%;
         }
 
         .brand-icon:focus-visible {
@@ -611,6 +616,11 @@
                 right: 16px;
                 bottom: 24px;
             }
+
+            #donate-button {
+                right: 12px;
+                top: 12px;
+            }
         }
     </style>
 </head>
@@ -990,14 +1000,6 @@
                 document.body.appendChild(overlay);
                 spotlight = overlay;
                 spotlightShell = shell;
-                const clone = baseImage.cloneNode(true);
-                clone.removeAttribute('alt');
-                clone.setAttribute('aria-hidden', 'true');
-                shell.appendChild(clone);
-                overlay.appendChild(shell);
-
-                document.body.appendChild(overlay);
-                spotlight = overlay;
 
                 requestAnimationFrame(() => {
                     overlay.classList.add('is-visible');
@@ -1011,45 +1013,8 @@
                     return;
                 }
 
-            const removeSpotlight = () => {
-                if (!spotlight) {
-                    return;
-                }
-
-                const overlay = spotlight;
-                spotlight = null;
-
-                const finalize = () => {
-                    overlay.remove();
-                };
-
-                overlay.classList.remove('is-visible');
-
-                if (prefersReducedMotion) {
-                    finalize();
-                } else {
-                    overlay.addEventListener('transitionend', finalize, { once: true });
-                }
-            };
-
-            const showSpotlight = () => {
                 logo.classList.add('is-spotlight-source');
                 ensureSpotlight();
-            };
-
-            logo.addEventListener('mouseenter', showSpotlight);
-            logo.addEventListener('focus', showSpotlight);
-            logo.addEventListener('touchstart', showSpotlight, { passive: true });
-            logo.addEventListener('blur', hideSpotlight);
-            const hideSpotlight = () => {
-                logo.classList.remove('is-spotlight-source');
-                removeSpotlight();
-            };
-
-            const closeTab = (event) => {
-                event.preventDefault();
-                hideSpotlight();
-                window.close();
             };
 
             logo.addEventListener('mouseenter', showSpotlight);

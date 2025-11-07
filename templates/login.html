@@ -40,6 +40,10 @@
 
         *, *::before, *::after { box-sizing: border-box; }
 
+        html {
+            overflow-x: hidden;
+        }
+
         body {
             margin: 0;
             min-height: 100vh;
@@ -51,7 +55,8 @@
             justify-content: center;
             padding: 40px 24px;
             position: relative;
-            overflow: hidden;
+            overflow-x: hidden;
+            overflow-y: auto;
         }
 
         #donate-button {
@@ -93,13 +98,15 @@
             border-radius: 50%;
             filter: blur(0px);
             opacity: 0.7;
+            max-width: 100vw;
+            max-height: 100vh;
         }
 
         body::before {
             width: 420px;
             height: 420px;
             top: -160px;
-            left: -140px;
+            left: clamp(-140px, -12vw, -60px);
             background: radial-gradient(circle, rgba(58, 166, 233, 0.35), transparent 70%);
         }
 
@@ -107,7 +114,7 @@
             width: 360px;
             height: 360px;
             bottom: -140px;
-            right: -120px;
+            right: clamp(-120px, -10vw, -48px);
             background: radial-gradient(circle, rgba(14, 27, 42, 0.12), transparent 65%);
         }
 
@@ -398,6 +405,7 @@
             .form-card { padding: 28px 22px; }
             .brand-summary { padding: 16px 18px; }
             button { padding: 14px 16px; }
+            #donate-button { right: 12px; top: 12px; }
         }
     </style>
 </head>
