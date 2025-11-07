@@ -990,14 +990,6 @@
                 document.body.appendChild(overlay);
                 spotlight = overlay;
                 spotlightShell = shell;
-                const clone = baseImage.cloneNode(true);
-                clone.removeAttribute('alt');
-                clone.setAttribute('aria-hidden', 'true');
-                shell.appendChild(clone);
-                overlay.appendChild(shell);
-
-                document.body.appendChild(overlay);
-                spotlight = overlay;
 
                 requestAnimationFrame(() => {
                     overlay.classList.add('is-visible');
