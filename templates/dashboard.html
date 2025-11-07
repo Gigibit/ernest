@@ -39,6 +39,10 @@
 
         *, *::before, *::after { box-sizing: border-box; }
 
+        html {
+            overflow-x: hidden;
+        }
+
         body {
             margin: 0;
             min-height: 100vh;
@@ -48,6 +52,7 @@
             padding: 42px 32px 56px;
             position: relative;
             overflow-x: hidden;
+            overflow-y: auto;
         }
 
         #donate-button {
@@ -86,22 +91,24 @@
         body::after {
             content: "";
             position: absolute;
-            width: 420px;
-            height: 420px;
             border-radius: 50%;
             filter: blur(0px);
             z-index: 0;
+            width: 420px;
+            height: 420px;
+            max-width: 100vw;
+            max-height: 100vh;
         }
 
         body::before {
             top: -180px;
-            right: -160px;
+            right: clamp(-160px, -12vw, -64px);
             background: radial-gradient(circle, rgba(58, 166, 233, 0.28), transparent 70%);
         }
 
         body::after {
             bottom: -200px;
-            left: -160px;
+            left: clamp(-160px, -12vw, -64px);
             background: radial-gradient(circle, rgba(14, 27, 42, 0.12), transparent 70%);
         }
 
@@ -117,7 +124,7 @@
         .layout::before {
             content: "";
             position: absolute;
-            inset: -24px;
+            inset: 0;
             background: var(--canvas-accent);
             filter: blur(2px);
             z-index: -1;
@@ -171,6 +178,7 @@
             position: relative;
             transform-origin: center;
             transition: transform 0.28s ease, box-shadow 0.28s ease;
+            max-width: 100%;
         }
 
         .brand-icon:focus-visible {
@@ -982,6 +990,7 @@
             .portal-header { padding: 24px; }
             .form-card { padding: 26px 22px; }
             .drop-zone { padding: 26px; }
+            #donate-button { right: 12px; top: 12px; }
         }
     </style>
 </head>
