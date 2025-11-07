@@ -903,7 +903,34 @@
         }
 
         @media (max-width: 640px) {
-            .portal-header { padding: 28px; }
+            .layout {
+                gap: 24px;
+            }
+
+            .layout::before {
+                display: none;
+            }
+
+            .portal-header {
+                padding: 28px 24px;
+                align-items: center;
+                text-align: center;
+                gap: 24px;
+            }
+
+            .portal-header .brand-icon {
+                margin: 0 auto;
+            }
+
+            .portal-header > div {
+                width: 100%;
+            }
+
+            .account {
+                align-items: center;
+                text-align: center;
+            }
+
             .form-card { padding: 30px 26px; }
             .drop-zone { padding: 32px; }
             form { grid-template-columns: 1fr; }
