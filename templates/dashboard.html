@@ -334,6 +334,9 @@
             padding: 6px 12px;
             font-family: 'Fira Code', 'Source Code Pro', monospace;
             font-size: 0.9rem;
+            display: block;
+            text-align: right;
+            word-break: break-word;
         }
 
         .logout {
@@ -934,6 +937,44 @@
             .form-card { padding: 30px 26px; }
             .drop-zone { padding: 32px; }
             form { grid-template-columns: 1fr; }
+        }
+
+        @media (max-width: 600px) {
+            .account {
+                align-items: stretch;
+                text-align: center;
+            }
+
+            .account code {
+                text-align: center;
+            }
+
+            .option-group .options {
+                flex-direction: column;
+            }
+
+            .option-card {
+                min-width: 0;
+                width: 100%;
+            }
+
+            .projects-wrapper {
+                padding: 22px 20px 26px;
+            }
+
+            .project-header {
+                padding: 16px;
+            }
+
+            .project-summary {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+
+            .project-updated {
+                width: 100%;
+            }
         }
 
         @media (max-width: 480px) {
@@ -1630,19 +1671,17 @@
             let spotlight = null;
             let spotlightShell = null;
 
-            const hideSpotlight = () => {
+            const removeSpotlight = () => {
                 if (!spotlight) {
                     return;
                 }
 
                 const overlay = spotlight;
-                const shell = spotlightShell;
-
                 spotlight = null;
-                spotlightShell = null;
 
-                if (shell) {
-                    shell.classList.remove('is-armed');
+                if (spotlightShell) {
+                    spotlightShell.classList.remove('is-armed');
+                    spotlightShell = null;
                 }
 
                 const finalize = () => {
@@ -1656,8 +1695,11 @@
                 } else {
                     overlay.addEventListener('transitionend', finalize, { once: true });
                 }
+            };
 
+            const hideSpotlight = () => {
                 logo.classList.remove('is-spotlight-source');
+                removeSpotlight();
             };
 
             const closeTab = (event) => {
@@ -1735,49 +1777,13 @@
             };
 
             const showSpotlight = () => {
+                logo.classList.add('is-spotlight-source');
+
                 if (spotlight) {
                     return;
                 }
 
-            const removeSpotlight = () => {
-                if (!spotlight) {
-                    return;
-                }
-
-                const overlay = spotlight;
-                spotlight = null;
-
-                const finalize = () => {
-                    overlay.remove();
-                };
-
-                overlay.classList.remove('is-visible');
-
-                if (prefersReducedMotion) {
-                    finalize();
-                } else {
-                    overlay.addEventListener('transitionend', finalize, { once: true });
-                }
-            };
-
-            const showSpotlight = () => {
-                logo.classList.add('is-spotlight-source');
                 ensureSpotlight();
-            };
-
-            logo.addEventListener('mouseenter', showSpotlight);
-            logo.addEventListener('focus', showSpotlight);
-            logo.addEventListener('touchstart', showSpotlight, { passive: true });
-            logo.addEventListener('blur', hideSpotlight);
-            const hideSpotlight = () => {
-                logo.classList.remove('is-spotlight-source');
-                removeSpotlight();
-            };
-
-            const closeTab = (event) => {
-                event.preventDefault();
-                hideSpotlight();
-                window.close();
             };
 
             logo.addEventListener('mouseenter', showSpotlight);
@@ -1787,12 +1793,18 @@
             logo.addEventListener('touchstart', showSpotlight, { passive: true });
             logo.addEventListener('touchend', hideSpotlight, { passive: true });
             logo.addEventListener('touchcancel', hideSpotlight, { passive: true });
-
             logo.addEventListener('click', closeTab);
             logo.addEventListener('keydown', (event) => {
                 if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
                     closeTab(event);
                 }
+
+                if (event.key === 'Escape') {
+                    hideSpotlight();
+                }
+            });
+
+            window.addEventListener('keydown', (event) => {
                 if (event.key === 'Escape') {
                     hideSpotlight();
                 }
