@@ -1670,11 +1670,21 @@
             const baseImage = logo.querySelector('img');
             let spotlight = null;
             let spotlightShell = null;
+            let hideSpotlightTimeout = null;
+
+            const cancelHideSpotlight = () => {
+                if (hideSpotlightTimeout) {
+                    clearTimeout(hideSpotlightTimeout);
+                    hideSpotlightTimeout = null;
+                }
+            };
 
             const removeSpotlight = () => {
                 if (!spotlight) {
                     return;
                 }
+
+                cancelHideSpotlight();
 
                 const overlay = spotlight;
                 spotlight = null;
@@ -1699,7 +1709,27 @@
 
             const hideSpotlight = () => {
                 logo.classList.remove('is-spotlight-source');
+                cancelHideSpotlight();
                 removeSpotlight();
+            };
+
+            const scheduleHideSpotlight = () => {
+                cancelHideSpotlight();
+
+                hideSpotlightTimeout = window.setTimeout(() => {
+                    hideSpotlightTimeout = null;
+
+                    if (logo.matches(':hover')) {
+                        return;
+                    }
+
+                    const overlay = spotlight;
+                    if (overlay && overlay.matches(':hover')) {
+                        return;
+                    }
+
+                    hideSpotlight();
+                }, 140);
             };
 
             const closeTab = (event) => {
@@ -1736,6 +1766,7 @@
                 overlay.appendChild(shell);
 
                 const armShell = () => {
+                    cancelHideSpotlight();
                     shell.classList.add('is-armed');
                 };
 
@@ -1749,14 +1780,25 @@
                 };
 
                 shell.addEventListener('pointerenter', armShell);
-                shell.addEventListener('pointerleave', dismissOverlay);
+                shell.addEventListener('pointerleave', (event) => {
+                    if (!shell.contains(event.relatedTarget)) {
+                        releaseShell();
+                        scheduleHideSpotlight();
+                    }
+                });
                 shell.addEventListener('focusin', armShell);
-                shell.addEventListener('focusout', releaseShell);
+                shell.addEventListener('focusout', (event) => {
+                    if (!shell.contains(event.relatedTarget)) {
+                        releaseShell();
+                        scheduleHideSpotlight();
+                    }
+                });
                 shell.addEventListener('click', closeTab);
 
+                overlay.addEventListener('pointerenter', cancelHideSpotlight);
                 overlay.addEventListener('pointerleave', (event) => {
                     if (!overlay.contains(event.relatedTarget)) {
-                        dismissOverlay();
+                        scheduleHideSpotlight();
                     }
                 });
 
@@ -1777,6 +1819,7 @@
             };
 
             const showSpotlight = () => {
+                cancelHideSpotlight();
                 logo.classList.add('is-spotlight-source');
 
                 if (spotlight) {
@@ -1787,9 +1830,9 @@
             };
 
             logo.addEventListener('mouseenter', showSpotlight);
-            logo.addEventListener('mouseleave', hideSpotlight);
+            logo.addEventListener('mouseleave', scheduleHideSpotlight);
             logo.addEventListener('focus', showSpotlight);
-            logo.addEventListener('blur', hideSpotlight);
+            logo.addEventListener('blur', scheduleHideSpotlight);
             logo.addEventListener('touchstart', showSpotlight, { passive: true });
             logo.addEventListener('touchend', hideSpotlight, { passive: true });
             logo.addEventListener('touchcancel', hideSpotlight, { passive: true });
