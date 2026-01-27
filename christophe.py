@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -463,6 +464,54 @@ def build_services(profiles: Optional[Dict[str, Dict[str, Any]]] = None) -> tupl
     llm = LLMService(profiles or _resolved_profiles())
     cache = CacheManager(Path(".cache/migration_cache.db"))
     return llm, cache
+
+
+def _derive_repo_name(repo_url: str) -> str:
+    candidate = (repo_url or "").strip().rstrip("/")
+    match = re.search(r"([^/:]+?)(?:\\.git)?$", candidate)
+    if match:
+        name = match.group(1)
+    else:
+        name = "git_project"
+    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_")
+    return sanitized or "git_project"
+
+
+def _clone_git_repository(repo_url: str, destination: Path, ref: Optional[str] = None) -> None:
+    command = ["git", "clone", "--depth", "1"]
+    if ref:
+        command.extend(["--branch", ref])
+    command.extend([repo_url, str(destination)])
+    try:
+        subprocess.run(
+            command,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("git is required to clone repositories.") from exc
+    except subprocess.CalledProcessError as exc:
+        details = exc.stderr.strip() or exc.stdout.strip()
+        message = details or "Unknown git error."
+        raise RuntimeError(f"Unable to clone repository: {message}") from exc
+
+
+def _prepare_git_archive(repo_url: str, ref: Optional[str], archive_path: Path) -> str:
+    repo_name = _derive_repo_name(repo_url)
+    archive_path = archive_path.with_suffix(".zip")
+    with tempfile.TemporaryDirectory(prefix="ernest_git_") as tmp:
+        repo_dir = Path(tmp) / repo_name
+        _clone_git_repository(repo_url, repo_dir, ref)
+        shutil.rmtree(repo_dir / ".git", ignore_errors=True)
+        archive_base = archive_path.with_suffix("")
+        archive_base.parent.mkdir(parents=True, exist_ok=True)
+        shutil.make_archive(str(archive_base), "zip", root_dir=repo_dir)
+        produced = archive_base.with_suffix(".zip")
+        if produced != archive_path:
+            produced.replace(archive_path)
+    return repo_name
 
 
 def run_migration(
@@ -1552,6 +1601,9 @@ def create_app(
             "src_framework": request.form.get("src_framework", ""),
             "safe_mode": safe_mode_enabled,
             "interpretation_mode": request.form.get("interpretation_mode", "heuristic"),
+            "source_mode": request.form.get("source_mode", "zip"),
+            "source_git": request.form.get("source_git", ""),
+            "git_ref": request.form.get("git_ref", ""),
         }
 
         defaults["interpretation_mode"] = (
@@ -1568,13 +1620,26 @@ def create_app(
             src_framework = defaults["src_framework"].strip() or None
             interpretation_mode = defaults["interpretation_mode"]
             uploaded = request.files.get("source_zip")
+            source_mode = (defaults.get("source_mode") or "zip").strip().lower()
+            source_git = (defaults.get("source_git") or "").strip()
+            git_ref = (defaults.get("git_ref") or "").strip() or None
+
+            use_git = source_mode == "git" or bool(source_git)
+            if use_git:
+                defaults["source_mode"] = "git"
 
             if not target_framework:
                 errors.append("Target framework is required.")
-            if not uploaded or uploaded.filename == "":
-                errors.append("You must upload a ZIP archive.")
-            elif not uploaded.filename.lower().endswith(".zip"):
-                errors.append("Uploaded file must have .zip extension.")
+            if use_git:
+                if not source_git:
+                    errors.append("Git repository URL is required.")
+                if uploaded and uploaded.filename:
+                    errors.append("Please upload a ZIP archive or provide a Git repository, not both.")
+            else:
+                if not uploaded or uploaded.filename == "":
+                    errors.append("You must upload a ZIP archive.")
+                elif not uploaded.filename.lower().endswith(".zip"):
+                    errors.append("Uploaded file must have .zip extension.")
 
             if interpretation_mode not in {"heuristic", "static"}:
                 errors.append("Unsupported interpretation mode selected.")
@@ -1584,64 +1649,87 @@ def create_app(
 
             project_record: Optional[Dict[str, Any]] = None
 
-            if not errors and uploaded:
-                filename = secure_filename(uploaded.filename)
-                if not filename:
-                    errors.append("Nome file non valido per l'upload.")
-                else:
-                    queued_at = _timestamp()
-                    metadata = {
-                        "queued_at": queued_at,
-                        "safe_mode": safe_mode_enabled,
-                        "error": None,
-                        "interpretation_mode": interpretation_mode,
-                    }
-                    project_record = user_store.create_project(
-                        user_id,
-                        name=Path(filename).stem,
-                        original_filename=uploaded.filename,
-                        target_framework=target_framework,
-                        target_language=target_lang,
-                        status="queued",
-                        metadata=metadata,
-                    )
-                    try:
+            if not errors:
+                queued_at = _timestamp()
+                metadata = {
+                    "queued_at": queued_at,
+                    "safe_mode": safe_mode_enabled,
+                    "error": None,
+                    "interpretation_mode": interpretation_mode,
+                }
+                if use_git:
+                    metadata["source_git"] = source_git
+                    if git_ref:
+                        metadata["git_ref"] = git_ref
+
+                try:
+                    if use_git:
+                        repo_name = _derive_repo_name(source_git)
+                        safe_repo_name = secure_filename(repo_name) or "git_project"
+                        project_record = user_store.create_project(
+                            user_id,
+                            name=repo_name,
+                            original_filename=source_git,
+                            target_framework=target_framework,
+                            target_language=target_lang,
+                            status="queued",
+                            metadata=metadata,
+                        )
+                        incoming_dir = web_output_root / user_id / project_record["id"] / "incoming"
+                        incoming_dir.mkdir(parents=True, exist_ok=True)
+                        archive_target = incoming_dir / f"{safe_repo_name}.zip"
+                        _prepare_git_archive(source_git, git_ref, archive_target)
+                    else:
+                        filename = secure_filename(uploaded.filename)
+                        if not filename:
+                            errors.append("Nome file non valido per l'upload.")
+                            raise RuntimeError("Invalid upload filename.")
+                        project_record = user_store.create_project(
+                            user_id,
+                            name=Path(filename).stem,
+                            original_filename=uploaded.filename,
+                            target_framework=target_framework,
+                            target_language=target_lang,
+                            status="queued",
+                            metadata=metadata,
+                        )
                         incoming_dir = web_output_root / user_id / project_record["id"] / "incoming"
                         incoming_dir.mkdir(parents=True, exist_ok=True)
                         archive_target = incoming_dir / filename
                         uploaded.save(str(archive_target))
-                        user_store.update_project(
-                            user_id,
-                            project_record["id"],
-                            status="queued",
-                            error=None,
-                            queued_at=project_record.get("queued_at", queued_at),
-                            safe_mode=safe_mode_enabled,
-                            interpretation_mode=interpretation_mode,
-                        )
-                        _schedule_web_migration(
-                            user_id=user_id,
-                            project_id=project_record["id"],
-                            archive_path=archive_target,
-                            target_framework=target_framework,
-                            target_lang=target_lang,
-                            src_lang=src_lang,
-                            src_framework=src_framework,
-                            safe_mode=safe_mode_enabled,
-                            interpretation_mode=interpretation_mode,
-                        )
-                        result_payload = {
-                            "project_id": project_record.get("id"),
-                            "project_name": project_record.get("name"),
-                            "status": "queued",
-                            "queued_at": project_record.get("queued_at", queued_at),
-                            "message": "Richiesta accettata. Ci vorrà un po', verrai notificato quando è pronto.",
-                        }
-                    except Exception as exc:  # noqa: BLE001
-                        app.logger.exception("Unable to queue migration")
-                        errors.append(str(exc))
-                        if project_record is not None:
-                            _finalise_failure(user_id, project_record["id"], str(exc))
+
+                    user_store.update_project(
+                        user_id,
+                        project_record["id"],
+                        status="queued",
+                        error=None,
+                        queued_at=project_record.get("queued_at", queued_at),
+                        safe_mode=safe_mode_enabled,
+                        interpretation_mode=interpretation_mode,
+                    )
+                    _schedule_web_migration(
+                        user_id=user_id,
+                        project_id=project_record["id"],
+                        archive_path=archive_target,
+                        target_framework=target_framework,
+                        target_lang=target_lang,
+                        src_lang=src_lang,
+                        src_framework=src_framework,
+                        safe_mode=safe_mode_enabled,
+                        interpretation_mode=interpretation_mode,
+                    )
+                    result_payload = {
+                        "project_id": project_record.get("id"),
+                        "project_name": project_record.get("name"),
+                        "status": "queued",
+                        "queued_at": project_record.get("queued_at", queued_at),
+                        "message": "Richiesta accettata. Ci vorrà un po', verrai notificato quando è pronto.",
+                    }
+                except Exception as exc:  # noqa: BLE001
+                    app.logger.exception("Unable to queue migration")
+                    errors.append(str(exc))
+                    if project_record is not None:
+                        _finalise_failure(user_id, project_record["id"], str(exc))
 
         pending_projects, completed_projects = _group_projects(user_id)
 
@@ -1819,6 +1907,18 @@ def create_app(
             or request.files.get("file")
             or request.files.get("source_zip")
         )
+        git_url = (
+            request.form.get("git_url")
+            or request.form.get("source_git")
+            or request.values.get("git_url")
+            or request.values.get("source_git")
+        )
+        git_ref = (
+            request.form.get("git_ref")
+            or request.values.get("git_ref")
+            or request.form.get("git_branch")
+            or request.values.get("git_branch")
+        )
         target_framework = (
             request.form.get("target_framework")
             or request.form.get("targetFramework")
@@ -1857,10 +1957,16 @@ def create_app(
         if interpretation_mode not in {"heuristic", "static"}:
             return ({"error": "interpretation_mode must be 'heuristic' or 'static'."}, 400)
 
-        if uploaded is None or uploaded.filename == "":
-            return ({"error": "A ZIP archive must be provided."}, 400)
-        if not uploaded.filename.lower().endswith(".zip"):
-            return ({"error": "The uploaded file must have a .zip extension."}, 400)
+        git_url = (git_url or "").strip() or None
+        git_ref = (git_ref or "").strip() or None
+
+        if git_url and uploaded and uploaded.filename:
+            return ({"error": "Provide either a ZIP archive or a git_url, not both."}, 400)
+        if not git_url:
+            if uploaded is None or uploaded.filename == "":
+                return ({"error": "A ZIP archive must be provided."}, 400)
+            if not uploaded.filename.lower().endswith(".zip"):
+                return ({"error": "The uploaded file must have a .zip extension."}, 400)
         if not target_framework:
             return ({"error": "target_framework is required."}, 400)
 
@@ -1870,22 +1976,44 @@ def create_app(
             "error": None,
             "interpretation_mode": interpretation_mode,
         }
+        if git_url:
+            metadata["source_git"] = git_url
+            if git_ref:
+                metadata["git_ref"] = git_ref
 
-        project_record = user_store.create_project(
-            user_id,
-            name=Path(uploaded.filename).stem,
-            original_filename=uploaded.filename,
-            target_framework=target_framework,
-            target_language=target_lang,
-            status="queued",
-            metadata=metadata,
-        )
-
-        suffix = Path(uploaded.filename).suffix or ".zip"
         incoming_dir = api_output_root / user_id / "incoming"
         incoming_dir.mkdir(parents=True, exist_ok=True)
-        archive_target = incoming_dir / f"{project_record['id']}{suffix}"
-        uploaded.save(str(archive_target))
+        if git_url:
+            repo_name = _derive_repo_name(git_url)
+            project_record = user_store.create_project(
+                user_id,
+                name=repo_name,
+                original_filename=git_url,
+                target_framework=target_framework,
+                target_language=target_lang,
+                status="queued",
+                metadata=metadata,
+            )
+            archive_target = incoming_dir / f"{project_record['id']}.zip"
+            try:
+                _prepare_git_archive(git_url, git_ref, archive_target)
+            except Exception as exc:  # noqa: BLE001
+                _finalise_failure(user_id, project_record["id"], str(exc))
+                return ({"error": str(exc)}, 400)
+        else:
+            project_record = user_store.create_project(
+                user_id,
+                name=Path(uploaded.filename).stem,
+                original_filename=uploaded.filename,
+                target_framework=target_framework,
+                target_language=target_lang,
+                status="queued",
+                metadata=metadata,
+            )
+
+            suffix = Path(uploaded.filename).suffix or ".zip"
+            archive_target = incoming_dir / f"{project_record['id']}{suffix}"
+            uploaded.save(str(archive_target))
 
         _schedule_api_migration(
             user_id=user_id,
@@ -1919,6 +2047,8 @@ def main() -> None:
     parser.add_argument("--target-lang", default="java")
     parser.add_argument("--src-lang", default=None)
     parser.add_argument("--src-framework", default=None)
+    parser.add_argument("--git-url", default=None, help="Clone a git repository instead of using a ZIP archive.")
+    parser.add_argument("--git-ref", default=None, help="Optional git branch or tag to checkout.")
     parser.add_argument("--reuse-cache", action="store_true")
     parser.add_argument("--serve", action="store_true", help="Launch the Flask web interface instead of running the CLI workflow.")
     parser.add_argument("--host", default="127.0.0.1", help="Host for the web interface when --serve is used.")
@@ -1944,6 +2074,8 @@ def main() -> None:
     if args.serve:
         if args.zip_path is not None:
             parser.error("zip_path is not compatible with --serve")
+        if args.git_url:
+            parser.error("--git-url is not compatible with --serve")
         llm, cache = build_services()
         app = create_app(llm=llm, cache=cache)
         try:
@@ -1952,14 +2084,25 @@ def main() -> None:
             cache.close()
         return
 
-    if args.zip_path is None:
-        parser.error("zip_path is required unless --serve is specified")
+    if args.zip_path and args.git_url:
+        parser.error("zip_path and --git-url are mutually exclusive")
+    if args.zip_path is None and not args.git_url:
+        parser.error("zip_path or --git-url is required unless --serve is specified")
     if not args.target_framework:
         parser.error("--target-framework is required when running the CLI workflow")
     llm, cache = build_services()
     try:
+        archive_path: Optional[Path] = None
+        temp_root: Optional[tempfile.TemporaryDirectory[str]] = None
+        if args.git_url:
+            repo_name = _derive_repo_name(args.git_url)
+            temp_root = tempfile.TemporaryDirectory(prefix="ernest_cli_")
+            archive_path = Path(temp_root.name) / f"{repo_name}.zip"
+            _prepare_git_archive(args.git_url, args.git_ref, archive_path)
+        else:
+            archive_path = args.zip_path
         result = run_migration(
-            args.zip_path,
+            archive_path,
             args.target_framework,
             args.target_lang,
             src_lang=args.src_lang,
@@ -1972,6 +2115,8 @@ def main() -> None:
         )
     finally:
         cache.close()
+        if temp_root is not None:
+            temp_root.cleanup()
 
     print_section("Classificazione File", json.dumps(result["classification"], indent=2))
     print_section("Stack Rilevato", json.dumps(result["detected_stack"], indent=2))
