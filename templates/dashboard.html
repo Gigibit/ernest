@@ -1026,7 +1026,7 @@
             <div class="form-card">
                 <div>
                     <h2>Queue a migration</h2>
-                    <p class="form-description">Upload a legacy transport ZIP, declare your target, and {{ brand_name }} will handle pagination, refinement, and scaffold generation.</p>
+                    <p class="form-description">Upload a legacy transport ZIP or connect a git repository, declare your target, and {{ brand_name }} will handle pagination, refinement, and scaffold generation.</p>
                 </div>
                 <form method="post" enctype="multipart/form-data">
                     <div>
@@ -1070,9 +1070,33 @@
                         </label>
                         <div class="hint">Automatically retries risky chunks with stricter prompts before committing them to the output workspace.</div>
                     </div>
-                    <div class="drop-zone" id="drop-zone">
+                    <div class="option-group">
+                        <span class="option-group-label">Source input</span>
+                        <div class="option-group-hint">Choose between a ZIP upload or a git repository URL.</div>
+                        <div class="options">
+                            <label class="option-card">
+                                <input type="radio" name="source_mode" value="zip" {% if defaults.source_mode != 'git' %}checked{% endif %}>
+                                <span class="option-title">ZIP upload</span>
+                                <span class="option-description">Upload an archive containing your legacy project.</span>
+                                <span class="option-marker">Selected</span>
+                            </label>
+                            <label class="option-card">
+                                <input type="radio" name="source_mode" value="git" {% if defaults.source_mode == 'git' %}checked{% endif %}>
+                                <span class="option-title">Git repository</span>
+                                <span class="option-description">Provide a git URL and optional branch/tag to clone.</span>
+                                <span class="option-marker">Selected</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="drop-zone" id="drop-zone" {% if defaults.source_mode == 'git' %}hidden{% endif %}>
                         <p id="drop-zone-text">Drag &amp; drop your source ZIP or click to browse</p>
-                        <input id="source_zip" name="source_zip" type="file" accept=".zip" hidden required>
+                        <input id="source_zip" name="source_zip" type="file" accept=".zip" hidden>
+                    </div>
+                    <div id="git-inputs" {% if defaults.source_mode != 'git' %}hidden{% endif %}>
+                        <label for="source_git">Git repository URL</label>
+                        <input id="source_git" name="source_git" type="text" value="{{ defaults.source_git }}" placeholder="e.g. https://github.com/org/repo.git">
+                        <label for="git_ref">Branch or tag (optional)</label>
+                        <input id="git_ref" name="git_ref" type="text" value="{{ defaults.git_ref }}" placeholder="e.g. main">
                     </div>
                     <div class="messages">
                     {% if errors %}
@@ -1312,6 +1336,35 @@
         const dropZone = document.getElementById('drop-zone');
         const dropZoneText = document.getElementById('drop-zone-text');
         const fileInput = document.getElementById('source_zip');
+        const sourceModeInputs = document.querySelectorAll('input[name="source_mode"]');
+        const gitInputs = document.getElementById('git-inputs');
+
+        function selectedSourceMode() {
+            const selected = document.querySelector('input[name="source_mode"]:checked');
+            return selected ? selected.value : 'zip';
+        }
+
+        function updateSourceMode() {
+            const mode = selectedSourceMode();
+            const useGit = mode === 'git';
+            if (dropZone) {
+                dropZone.hidden = useGit;
+            }
+            if (gitInputs) {
+                gitInputs.hidden = !useGit;
+            }
+            if (fileInput) {
+                fileInput.required = !useGit;
+                if (useGit) {
+                    fileInput.value = '';
+                    if (dropZoneText) {
+                        dropZoneText.textContent = 'ZIP upload disabled while using git';
+                    }
+                } else if (dropZoneText && fileInput.files.length === 0) {
+                    dropZoneText.textContent = 'Drag & drop your source ZIP or click to browse';
+                }
+            }
+        }
 
         if (dropZone) {
             dropZone.addEventListener('click', () => fileInput.click());
@@ -1353,6 +1406,13 @@
                     dropZoneText.textContent = file.name;
                 }
             });
+        }
+
+        if (sourceModeInputs.length > 0) {
+            sourceModeInputs.forEach((input) => {
+                input.addEventListener('change', updateSourceMode);
+            });
+            updateSourceMode();
         }
     </script>
     <script>
