@@ -13,6 +13,24 @@ HF_TOKEN=hf_xxx
 The application automatically loads the `.env` file on startup so the token is
 available when downloading models.
 
+## Azure OpenAI configuration
+
+Ernest can call Azure OpenAI instead of local Hugging Face models. Set these
+values in your `.env` file to enable it:
+
+```bash
+ERNEST_LLM_MODE=azure
+ERNEST_AZURE_OPENAI_ENDPOINT=https://your-resource-name.openai.azure.com/
+ERNEST_AZURE_OPENAI_API_VERSION=2024-02-15-preview
+ERNEST_AZURE_OPENAI_API_KEY=your-azure-openai-key
+# Optional default deployment if you want every profile to share a deployment.
+ERNEST_AZURE_OPENAI_DEPLOYMENT=ernest-gpt-4o
+```
+
+You can also set per-profile deployment names via the existing
+`MIGRATION_PROFILE_*_ID` variables in `.env` to map specific Azure deployments
+to each profile (for example, `MIGRATION_PROFILE_TRANSLATE_ID=ernest-gpt-4o`).
+
 ## Passphrase whitelist (enterprise PoC)
 
 The authenticated web portal can be locked down to a fixed list of preview

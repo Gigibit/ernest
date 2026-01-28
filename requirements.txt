@@ -4,7 +4,7 @@ transformers
 accelerate
 bitsandbytes
 huggingface_hub[cli]
+openai
 Flask
 duckduckgo-search
 langchain-community
-
