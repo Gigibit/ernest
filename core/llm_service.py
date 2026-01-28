@@ -35,8 +35,12 @@ class LLMService:
         self._replay_profiles = {}
         self._replay_default = deque()
         self._replay_path = None
+        self._azure_client = None
+        self._azure_default_deployment = None
         if self.mode == "mock":
             self._initialise_mock_store()
+        if self.mode == "azure":
+            self._init_azure_client()
         self._log_hardware_state()
 
     def _get_pipe(self, name):
@@ -65,6 +69,10 @@ class LLMService:
         if self.mode == "mock":
             completion = self._mock_completion(name, prompt)
             self._register_mock_usage(name, prompt, completion)
+            return completion
+
+        if self.mode == "azure":
+            completion = self._invoke_azure(name, prompt, **overrides)
             return completion
 
         pipe_bundle = self._get_pipe(name)
@@ -189,6 +197,88 @@ class LLMService:
         record["prompt_tokens"] += prompt_tokens
         record["completion_tokens"] += completion_tokens
         record["invocations"] += 1
+
+    def _init_azure_client(self) -> None:
+        from openai import AzureOpenAI
+
+        endpoint = os.environ.get("ERNEST_AZURE_OPENAI_ENDPOINT") or os.environ.get(
+            "AZURE_OPENAI_ENDPOINT"
+        )
+        api_version = os.environ.get("ERNEST_AZURE_OPENAI_API_VERSION") or os.environ.get(
+            "AZURE_OPENAI_API_VERSION"
+        )
+        api_key = os.environ.get("ERNEST_AZURE_OPENAI_API_KEY") or os.environ.get(
+            "AZURE_OPENAI_API_KEY"
+        )
+        deployment = os.environ.get("ERNEST_AZURE_OPENAI_DEPLOYMENT") or os.environ.get(
+            "AZURE_OPENAI_DEPLOYMENT"
+        )
+
+        missing = []
+        if not endpoint:
+            missing.append("ERNEST_AZURE_OPENAI_ENDPOINT")
+        if not api_version:
+            missing.append("ERNEST_AZURE_OPENAI_API_VERSION")
+        if not api_key:
+            missing.append("ERNEST_AZURE_OPENAI_API_KEY")
+        if missing:
+            raise ValueError(
+                "Azure OpenAI mode requires the following environment variables: "
+                + ", ".join(missing)
+            )
+
+        self._azure_default_deployment = deployment
+        self._azure_client = AzureOpenAI(
+            api_key=api_key,
+            api_version=api_version,
+            azure_endpoint=endpoint,
+        )
+
+    def _invoke_azure(self, name: str, prompt: str, **overrides) -> str:
+        if self._azure_client is None:
+            raise RuntimeError("Azure OpenAI client not initialised.")
+
+        prof = self.profiles[name]
+        deployment = (
+            overrides.get("deployment")
+            or prof.get("deployment")
+            or prof.get("id")
+            or self._azure_default_deployment
+        )
+        if not deployment:
+            raise ValueError(
+                f"Azure OpenAI deployment is missing for profile '{name}'. Set "
+                "MIGRATION_PROFILE_*_ID or ERNEST_AZURE_OPENAI_DEPLOYMENT."
+            )
+
+        max_tokens = overrides.get("max_new_tokens", prof.get("max", 512))
+        temperature = overrides.get("temperature", prof.get("temp", 0.0))
+        top_p = overrides.get("top_p", prof.get("top_p", 1.0))
+        system_prompt = overrides.get(
+            "system_prompt",
+            "You are a helpful assistant. Keep coding output separate from reasoning "
+            "and return only the final content requested.",
+        )
+
+        response = self._azure_client.chat.completions.create(
+            model=deployment,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+        )
+        message = response.choices[0].message.content if response.choices else ""
+        usage = getattr(response, "usage", None)
+        if usage:
+            self._register_usage(
+                name,
+                int(getattr(usage, "prompt_tokens", 0) or 0),
+                int(getattr(usage, "completion_tokens", 0) or 0),
+            )
+        return (message or "").strip()
 
     def _log_hardware_state(self) -> None:
         try:
